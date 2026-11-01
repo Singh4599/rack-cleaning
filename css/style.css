@@ -144,15 +144,16 @@ body {
   overflow: hidden;
   flex-shrink: 0;
   position: relative;
-  background: linear-gradient(to bottom, #FDF8F0 0%, #F5E8D0 100%);
+  background: #ffffff;
+  border-top: 1px solid var(--border-soft);
 }
 .sidebar-spice img {
   width: 100%; height: 100%;
-  object-fit: cover;
-  object-position: bottom center;
+  object-fit: contain;
+  object-position: center bottom;
   display: block;
   opacity: 1;
-  mix-blend-mode: multiply; /* blends transparent PNG onto warm cream bg */
+  padding: 8px 4px 0;
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -349,7 +350,7 @@ body {
 }
 
 /* Date Controls */
-.date-controls { display: flex; align-items: center; gap: 6px; }
+.date-controls { display: flex; align-items: center; gap: 4px; }
 .date-btn {
   padding: 6px 14px;
   border-radius: var(--radius-sm);
@@ -358,12 +359,28 @@ body {
   font-size: 12px; font-weight: 600;
   color: var(--text-2); cursor: pointer;
   transition: all 0.15s; font-family: inherit;
+  white-space: nowrap;
 }
 .date-btn.active {
   background: var(--brand); color: #fff; border-color: var(--brand);
   box-shadow: 0 1px 4px rgba(144,12,50,0.2);
 }
 .date-btn:not(.active):hover { background: var(--bg); }
+
+/* Prev / Next day arrows */
+.day-nav-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2); cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.day-nav-btn:hover { background: var(--bg); color: var(--text-1); border-color: #CBD5E1; }
+.day-nav-btn:disabled { opacity: 0.35; cursor: default; }
+
 .date-picker-btn {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 14px;
@@ -373,6 +390,8 @@ body {
   font-size: 12px; font-weight: 600;
   color: var(--text-2); cursor: pointer;
   transition: all 0.15s; position: relative;
+  font-family: inherit;
+  white-space: nowrap;
 }
 .date-picker-btn:hover { background: var(--bg); }
 .date-picker-btn.has-date {

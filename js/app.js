@@ -94,14 +94,46 @@ function checkAndGenerateToday() {
 }
 
 // ── DATE CONTROLS ────────────────────────────────────────────────────────────
+function syncDateUI() {
+  const isToday = activeDate === todayStr();
+  const btnToday  = document.getElementById('btn-today');
+  const pickerBtn = document.getElementById('btn-pick-date');
+  const pickerTxt = document.getElementById('date-picker-text');
+  const datePicker= document.getElementById('date-picker');
+  const btnNext   = document.getElementById('btn-next-day');
+
+  if (btnToday)   btnToday.classList.toggle('active', isToday);
+  if (datePicker) datePicker.value = isToday ? '' : activeDate;
+  if (pickerBtn)  pickerBtn.classList.toggle('has-date', !isToday);
+  if (pickerTxt)  pickerTxt.textContent = isToday ? 'Select Date' : fmtDate(activeDate);
+  if (btnNext)    btnNext.disabled = activeDate >= todayStr();
+}
+
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
 window.setToday = function() {
   activeDate = todayStr();
-  const btnToday = document.getElementById('btn-today');
-  const datePicker = document.getElementById('date-picker');
-  const pickerBtn = document.querySelector('.date-picker-btn');
-  if (btnToday)   btnToday.classList.add('active');
-  if (datePicker) datePicker.value = '';
-  if (pickerBtn)  { pickerBtn.classList.remove('has-date'); pickerBtn.querySelector('span').textContent = 'Select Date'; }
+  syncDateUI();
+  renderAll();
+};
+
+window.goToPrevDay = function() {
+  activeDate = addDays(activeDate, -1);
+  syncDateUI();
+  renderAll();
+};
+
+window.goToNextDay = function() {
+  if (activeDate >= todayStr()) return;
+  activeDate = addDays(activeDate, +1);
+  syncDateUI();
   renderAll();
 };
 
@@ -304,16 +336,7 @@ async function saveModal() {
     document.getElementById('unit-btn-11')?.classList.toggle('active', activeUnit === 'Unit 11');
     document.getElementById('unit-btn-12')?.classList.toggle('active', activeUnit === 'Unit 12');
     // Sync date controls
-    const btnToday = document.getElementById('btn-today');
-    const datePicker = document.getElementById('date-picker');
-    const pickerBtn  = document.querySelector('.date-picker-btn');
-    const isToday = activeDate === todayStr();
-    if (btnToday)    btnToday.classList.toggle('active', isToday);
-    if (datePicker)  datePicker.value = isToday ? '' : activeDate;
-    if (pickerBtn) {
-      pickerBtn.classList.toggle('has-date', !isToday);
-      pickerBtn.querySelector('span').textContent = isToday ? 'Select Date' : fmtDate(activeDate);
-    }
+    syncDateUI();
   } catch (e) {
     console.error(e);
     showToast('Error saving.', 'error');
@@ -380,27 +403,34 @@ function init() {
 
   // Default date = today
   activeDate = todayStr();
-  const btnToday = document.getElementById('btn-today');
-  if (btnToday) {
-    btnToday.classList.add('active');
-    btnToday.addEventListener('click', window.setToday);
-  }
+  syncDateUI();
 
-  // Date picker
+  // Today button
+  document.getElementById('btn-today')?.addEventListener('click', window.setToday);
+
+  // Prev / Next day arrows
+  document.getElementById('btn-prev-day')?.addEventListener('click', window.goToPrevDay);
+  document.getElementById('btn-next-day')?.addEventListener('click', window.goToNextDay);
+
+  // Date picker button — use showPicker() API (Chrome 99+, Firefox 101+)
   const datePicker = document.getElementById('date-picker');
+  const btnPickDate = document.getElementById('btn-pick-date');
   if (datePicker) {
     datePicker.max = todayStr();
     datePicker.addEventListener('change', e => {
       if (!e.target.value) return;
       activeDate = e.target.value;
-      const btnT = document.getElementById('btn-today');
-      const pBtn = document.querySelector('.date-picker-btn');
-      if (btnT) btnT.classList.remove('active');
-      if (pBtn) {
-        pBtn.classList.add('has-date');
-        pBtn.querySelector('span').textContent = fmtDate(activeDate);
-      }
+      syncDateUI();
       renderAll();
+    });
+  }
+  if (btnPickDate) {
+    btnPickDate.addEventListener('click', e => {
+      e.preventDefault();
+      const dp = document.getElementById('date-picker');
+      if (!dp) return;
+      try { dp.showPicker(); }
+      catch(_) { dp.focus(); dp.click(); }
     });
   }
 
