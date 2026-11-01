@@ -77,20 +77,50 @@ function updateCloudBadge() {
 window.addEventListener('online',  () => { isOnline = true;  updateCloudBadge(); });
 window.addEventListener('offline', () => { isOnline = false; updateCloudBadge(); });
 
-// ── CHECK TODAY — auto-generate entries for today if missing ──────────────────
-let _generatingToday = false; // guard against duplicate writes
+// ── CHECK TODAY — auto-generate entries if missing ────────────────────────────
+// Session-level set — once a unit's today-entries are confirmed/generated, skip forever
+const _unitTodayConfirmed = new Set();
+
 function checkAndGenerateToday() {
-  if (_generatingToday) return;
   const today = todayStr();
-  const missing = UNITS.filter(unit =>
-    !allRecords.some(r => r.date === today && (r.unit || 'Unit 11') === unit)
-  );
-  if (!missing.length) return;
-  _generatingToday = true;
-  Promise.all(missing.map(unit => {
-    const entries = generateDayEntries(today).filter(e => e.unit === unit);
-    return batchSaveRecords(entries);
-  })).catch(console.error).finally(() => { _generatingToday = false; });
+  UNITS.forEach(unit => {
+    if (_unitTodayConfirmed.has(unit)) return; // already handled this session
+    const hasEntries = allRecords.some(r => r.date === today && (r.unit || 'Unit 11') === unit);
+    if (hasEntries) {
+      _unitTodayConfirmed.add(unit); // already exists → mark confirmed, never generate again
+    } else {
+      _unitTodayConfirmed.add(unit); // mark first so concurrent snapshots don't double-generate
+      const entries = generateDayEntries(today).filter(e => e.unit === unit);
+      batchSaveRecords(entries).catch(err => {
+        _unitTodayConfirmed.delete(unit); // allow retry only on actual error
+        console.error(err);
+      });
+    }
+  });
+}
+
+// ── DEDUP — remove duplicate Firestore records for a given date ────────────────
+async function deduplicateDate(dateStr) {
+  const dayRecs = allRecords.filter(r => r.date === dateStr);
+  const seen = new Map();
+  const toDelete = [];
+  // Sort oldest first (keep oldest, delete newer duplicates)
+  [...dayRecs]
+    .sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0))
+    .forEach(r => {
+      // Key: unit + rack + time + area (enough to identify a unique cleaning event)
+      const key = `${r.unit || 'Unit 11'}|${r.rackId}|${r.cleaningTime}|${r.area}`;
+      if (seen.has(key)) {
+        toDelete.push(r.id);
+      } else {
+        seen.set(key, r.id);
+      }
+    });
+  if (toDelete.length) {
+    await Promise.all(toDelete.map(id => deleteRecord(id)));
+    console.log(`🧹 Deduped ${toDelete.length} records for ${dateStr}`);
+    showToast(`Removed ${toDelete.length} duplicate entries ✓`);
+  }
 }
 
 // ── DATE CONTROLS ────────────────────────────────────────────────────────────
@@ -379,6 +409,160 @@ function exportCSV() {
   showToast('Exported ✓');
 }
 
+// ── PRINT A4 ──────────────────────────────────────────────────────────────────
+let _printTab = 'day';
+
+window.setPrintTab = function(tab) {
+  _printTab = tab;
+  document.getElementById('print-panel-day').style.display   = tab === 'day'   ? '' : 'none';
+  document.getElementById('print-panel-range').style.display = tab === 'range' ? '' : 'none';
+  document.getElementById('ptab-day').classList.toggle('active',   tab === 'day');
+  document.getElementById('ptab-range').classList.toggle('active', tab === 'range');
+  updatePrintInfo();
+};
+
+function updatePrintInfo() {
+  const info = document.getElementById('print-info');
+  if (!info) return;
+  const today = todayStr();
+  if (_printTab === 'day') {
+    const d = document.getElementById('pm-single-date')?.value || today;
+    const recs = allRecords.filter(r => (r.unit||'Unit 11') === activeUnit && r.date === d);
+    info.textContent = `📋 ${recs.length} record${recs.length !== 1 ? 's' : ''} on ${fmtDate(d) || 'selected date'}`;
+  } else {
+    const from = document.getElementById('pm-from-date')?.value;
+    const to   = document.getElementById('pm-to-date')?.value;
+    if (!from || !to) { info.textContent = 'Select from and to dates'; return; }
+    if (from > to)    { info.textContent = '⚠️ From must be before To date'; return; }
+    const days = Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
+    const recs = allRecords.filter(r => (r.unit||'Unit 11') === activeUnit && r.date >= from && r.date <= to);
+    info.textContent = `📅 ${days} day${days !== 1 ? 's' : ''} • ${recs.length} records total`;
+  }
+}
+
+function openPrintModal() {
+  const today = todayStr();
+  const sEl = document.getElementById('pm-single-date');
+  const fEl = document.getElementById('pm-from-date');
+  const tEl = document.getElementById('pm-to-date');
+  if (sEl) { sEl.value = activeDate; sEl.max = today; }
+  if (fEl) { fEl.value = activeDate; fEl.max = today; }
+  if (tEl) { tEl.value = today;      tEl.max = today; }
+  setPrintTab('day');
+  document.getElementById('print-modal').classList.add('open');
+  updatePrintInfo();
+}
+
+function closePrintModal() {
+  document.getElementById('print-modal').classList.remove('open');
+}
+
+function executePrint() {
+  const today = todayStr();
+  let dates = [];
+  if (_printTab === 'day') {
+    const d = document.getElementById('pm-single-date')?.value;
+    if (!d) { alert('Please select a date.'); return; }
+    dates = [d];
+  } else {
+    const from = document.getElementById('pm-from-date')?.value;
+    const to   = document.getElementById('pm-to-date')?.value;
+    if (!from || !to)  { alert('Please select From and To dates.'); return; }
+    if (from > to)     { alert('From date must be before To date.'); return; }
+    const days = Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
+    if (days > 62 && !confirm(`Printing ${days} days. Continue?`)) return;
+    let cur = new Date(from + 'T00:00:00'), end = new Date(to + 'T00:00:00');
+    while (cur <= end) {
+      dates.push(cur.toISOString().split('T')[0]);
+      cur.setDate(cur.getDate() + 1);
+    }
+  }
+  closePrintModal();
+  printRackRecords(dates);
+}
+
+function printRackRecords(dates) {
+  function esc(v) { return v ? String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '\u2014'; }
+  const rackBg    = { 'Rack 1':'#DBEAFE','Rack 2':'#DCFCE7','Rack 3':'#FFEDD5' };
+  const rackColor = { 'Rack 1':'#1D4ED8','Rack 2':'#15803D','Rack 3':'#C2410C' };
+
+  const pagesHtml = dates.map((ds, pi) => {
+    const recs = allRecords.filter(r => (r.unit||'Unit 11') === activeUnit && r.date === ds)
+                           .sort((a,b) => (a.cleaningTime||'').localeCompare(b.cleaningTime||''));
+    const [y,m,d] = ds.split('-');
+    const dateStr = `${d}/${m}/${y}`;
+    const dayName = new Date(ds+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long'});
+    const rowH = recs.length ? Math.max(12, Math.floor(155/Math.max(recs.length,3))) : 22;
+
+    const rowsHtml = recs.length
+      ? recs.map((r,i) => `<tr style="height:${rowH}mm;${i%2===1?'background:#f9fafb':''}">
+          <td style="text-align:center;color:#6b7280;font-weight:700">${i+1}</td>
+          <td style="white-space:nowrap;font-weight:600">${esc(dateStr)}</td>
+          <td><span style="background:${rackBg[r.rackId]||'#f3f4f6'};color:${rackColor[r.rackId]||'#374151'};padding:2pt 7pt;border-radius:4pt;font-size:7pt;font-weight:800;-webkit-print-color-adjust:exact;print-color-adjust:exact">${esc(r.rackId)}</span></td>
+          <td>${esc(r.area)}</td>
+          <td style="text-align:center;font-variant-numeric:tabular-nums;font-weight:600">${esc(r.cleaningTime)}</td>
+          <td>${esc(r.method)}</td>
+          <td style="text-align:center"><span style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:1.5pt 5pt;border-radius:3pt;font-size:6.5pt;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact">${r.cleaningDone!==false?'\u2713 YES':'\u2717 NO'}</span></td>
+          <td>${esc(r.checkedBy)}</td>
+          <td style="color:#6b7280;font-size:7.5pt">${esc(r.remarks)}</td>
+        </tr>`).join('')
+      : `<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:20pt;font-style:italic">No records for this date</td></tr>`;
+
+    return `<div style="page-break-after:${pi<dates.length-1?'always':'avoid'}">
+<div style="border:2pt solid #000;padding:6pt 10pt;margin-bottom:6pt">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start">
+    <div>
+      <h1 style="font-size:13pt;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rack Cleaning Record \u2014 365 Spicery</h1>
+      <p style="font-size:7.5pt;color:#444;margin-top:2pt">FSSAI Compliance Log \u2022 Daily Rack Sanitation \u2022 ${esc(activeUnit)}</p>
+    </div>
+    <div style="text-align:right;font-size:7.5pt;color:#444;line-height:1.6">
+      <div><b>Date:</b> ${dateStr} &nbsp; <b>Day:</b> ${dayName}</div>
+      <div><b>Unit:</b> ${esc(activeUnit)}</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:8pt;margin-top:5pt">
+    <span style="border:1pt solid #555;padding:1pt 7pt;font-size:7pt;border-radius:3pt">📋 Records: <b>${recs.length}</b></span>
+    <span style="border:1pt solid #555;padding:1pt 7pt;font-size:7pt;border-radius:3pt">🧹 Racks Cleaned: <b>${[...new Set(recs.map(r=>r.rackId))].join(', ')||'\u2014'}</b></span>
+  </div>
+</div>
+<table>
+  <thead><tr>
+    <th style="width:4%;text-align:center">SR.</th><th style="width:9%">DATE</th>
+    <th style="width:8%">RACK</th><th style="width:22%">AREA / SECTION</th>
+    <th style="width:7%;text-align:center">TIME</th><th style="width:13%">METHOD</th>
+    <th style="width:8%;text-align:center">DONE</th><th style="width:14%">CHECKED BY</th>
+    <th>REMARKS</th>
+  </tr></thead>
+  <tbody>${rowsHtml}</tbody>
+</table>
+<div style="margin-top:10pt;font-size:8pt;display:flex;justify-content:space-between;border-top:1pt solid #ccc;padding-top:6pt">
+  <span><b>Prepared By:</b> _______________________</span>
+  <span><b>Checked By:</b> _______________________</span>
+  <span><b>Approved By:</b> _______________________</span>
+</div></div>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Rack Cleaning Record \u2014 ${activeUnit}</title>
+<style>
+  @page{size:A4 landscape;margin:8mm}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{font-family:Arial,sans-serif;font-size:8.5pt;color:#000;background:#fff}
+  table{width:100%;border-collapse:collapse;margin-top:5pt}
+  thead{display:table-header-group}
+  tr{page-break-inside:avoid}
+  th{background:#1a1a1a;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-size:7pt;padding:5pt 4pt;border:0.75pt solid #000;text-align:left}
+  td{font-size:8pt;padding:3pt 4pt;border:0.5pt solid #ccc;vertical-align:middle}
+</style></head>
+<body>${pagesHtml}
+<script>window.onload=function(){window.print();setTimeout(function(){window.close();},900);};<\/script>
+</body></html>`;
+
+  const pw = window.open('','_blank','width=1200,height=850');
+  if (pw) { pw.document.write(html); pw.document.close(); }
+  else alert('Allow popups to use Print.');
+}
+
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
 window.toggleSettings = function() {
   const p = document.getElementById('settings-panel');
@@ -459,10 +643,30 @@ function init() {
   document.getElementById('modal-save')?.addEventListener('click', saveModal);
   document.getElementById('m-unit')?.addEventListener('change', updateModalAreas);
 
+  // Print button
+  document.getElementById('btn-print')?.addEventListener('click', openPrintModal);
+  document.getElementById('print-modal-close')?.addEventListener('click', closePrintModal);
+  document.getElementById('print-modal-cancel')?.addEventListener('click', closePrintModal);
+  document.getElementById('print-modal')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) closePrintModal();
+  });
+  document.getElementById('print-modal-execute')?.addEventListener('click', executePrint);
+
+  // Wire print tab date pickers to update info
+  ['pm-single-date','pm-from-date','pm-to-date'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', updatePrintInfo);
+  });
+
   // Subscribe Firestore
+  let _firstLoad = true;
   subscribeRecords(records => {
     allRecords = records;
     checkAndGenerateToday();
+    if (_firstLoad) {
+      _firstLoad = false;
+      // Auto-dedup today on first load to clean up any existing duplicates
+      deduplicateDate(todayStr()).catch(console.error);
+    }
     renderAll();
     showLoader(false);
   });

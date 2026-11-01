@@ -617,6 +617,26 @@ tbody td:last-child { width: 80px; white-space: nowrap; }
   flex-shrink: 0;
 }
 
+/* ── PRINT TABS ─────────────────────────────────────────────── */
+.print-tabs {
+  display: flex;
+  background: #F1F5F9;
+  border: 1px solid #CBD5E1;
+  border-radius: 8px;
+  padding: 3px; gap: 3px;
+}
+.print-tab {
+  flex: 1;
+  padding: 7px;
+  border-radius: 6px; border: none;
+  font-size: 12px; font-weight: 600;
+  background: transparent; color: #64748B;
+  cursor: pointer; transition: all 0.15s;
+  font-family: inherit;
+}
+.print-tab.active { background: var(--brand); color: #fff; }
+.print-tab:not(.active):hover { background: #E2E8F0; }
+
 /* ── TOAST ──────────────────────────────────────────────────── */
 .toast {
   position: fixed; bottom: 24px; right: 24px;
