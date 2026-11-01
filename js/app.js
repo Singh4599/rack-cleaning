@@ -3,32 +3,24 @@ import { generateDayEntries, generateDateRange, todayStr, UNITS, UNIT_AREAS, STA
 
 // ── STATE ──────────────────────────────────────────────────────────────────────
 let allRecords  = [];
-let activeUnit  = 'Unit 11';
-let activeMonth = '';
+let activeUnit  = localStorage.getItem('rc_active_unit') || 'Unit 11';
+let activeDate  = todayStr();   // single-day filter (default = today)
 let searchQuery = '';
 let editingId   = null;
 let isOnline    = navigator.onLine;
 
-// All months with data (sorted desc) for nav
-let monthList   = [];
-
 // ── HELPERS ───────────────────────────────────────────────────────────────────
-const pad    = n => String(n).padStart(2, '0');
-const mkKey  = d => d ? d.slice(0, 7) : '';
+const pad     = n => String(n).padStart(2, '0');
 const fmtDate = d => { if (!d) return ''; const [y,m,dd] = d.split('-'); return `${dd}/${m}/${y}`; };
 
-function monthLabel(key) {
-  if (!key) return '';
-  const [y, m] = key.split('-');
-  return new Date(+y, +m - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
-}
-function yesterday() {
-  const d = new Date(); d.setDate(d.getDate()-1);
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+function fmtDateLong(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-IN', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
 }
 
 function methodClass(method) {
-  if (!method) return '';
+  if (!method) return 'mb-dry';
   const m = method.toLowerCase();
   if (m.includes('vacuum'))   return 'mb-vacuum';
   if (m.includes('sanitize')) return 'mb-sanitize';
@@ -39,17 +31,26 @@ function methodClass(method) {
   return 'mb-dry';
 }
 
-function methodIcon(method) {
-  if (!method) return '';
+function methodSVG(method) {
+  if (!method) return svgDroplet();
   const m = method.toLowerCase();
-  if (m.includes('vacuum'))   return '🌀';
-  if (m.includes('sanitize')) return '🧴';
-  if (m.includes('wet'))      return '💧';
-  if (m.includes('sweep'))    return '🧹';
-  if (m.includes('dry'))      return '🌿';
-  if (m.includes('dust'))     return '🌬️';
-  return '🧹';
+  if (m.includes('vacuum'))   return svgVacuum();
+  if (m.includes('sanitize')) return svgSanitize();
+  if (m.includes('wet'))      return svgDroplet();
+  if (m.includes('sweep'))    return svgSweep();
+  if (m.includes('dry'))      return svgLeaf();
+  if (m.includes('dust'))     return svgWind();
+  return svgDroplet();
 }
+
+function svgDroplet()  { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>`; }
+function svgVacuum()   { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>`; }
+function svgSanitize() { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11"><path d="M12 22C6 22 2 17 2 11V5l10-3 10 3v6c0 6-4 11-10 11z"/></svg>`; }
+function svgSweep()    { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11"><path d="M3 21h18M3 7l9-4 9 4M4 7v14M20 7v14M9 21V7M15 21V7"/></svg>`; }
+function svgLeaf()     { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg>`; }
+function svgWind()     { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11"><path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2M9.6 4.6A2 2 0 1 1 11 8H2M12.6 19.4A2 2 0 1 0 14 16H2"/></svg>`; }
+
+function clockSVG()    { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" style="opacity:.5;flex-shrink:0"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`; }
 
 function showToast(msg, type = 'success') {
   const t = document.getElementById('toast');
@@ -65,193 +66,163 @@ function showLoader(v) {
 
 function updateCloudBadge() {
   const b = document.getElementById('cloud-badge');
-  b.textContent = isOnline ? '☁️ Cloud Synced' : '🔴 Offline';
-  b.className = `cloud-badge ${isOnline ? 'online' : 'offline'}`;
+  if (isOnline) {
+    b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/><polyline points="8 14 11 17 16 11"/></svg> Cloud Synced`;
+    b.className = 'cloud-badge online';
+  } else {
+    b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9.34 9.34A5 5 0 0 0 9 11H5a4 4 0 0 0 0 8h13a3 3 0 0 0 .46-5.97"/></svg> Offline`;
+    b.className = 'cloud-badge offline';
+  }
 }
 window.addEventListener('online',  () => { isOnline = true;  updateCloudBadge(); });
 window.addEventListener('offline', () => { isOnline = false; updateCloudBadge(); });
 
-// ── INIT ───────────────────────────────────────────────────────────────────────
-function init() {
-  updateCloudBadge();
-  showLoader(true);
-
-  // Set current month default
-  const today = todayStr();
-  activeMonth = mkKey(today);
-
-  // Subscribe realtime
-  subscribeRecords(records => {
-    allRecords = records;
-    checkAndGenerateToday();
-    buildMonthList();
-    renderAll();
-    showLoader(false);
-  });
-
-  // Unit buttons (sidebar)
-  document.querySelectorAll('.unit-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      activeUnit = btn.dataset.unit;
-      document.querySelectorAll('.unit-btn').forEach(b => b.classList.toggle('active', b.dataset.unit === activeUnit));
-      buildMonthList();
-      renderAll();
-    });
-  });
-
-  // Month nav
-  document.getElementById('btn-prev-month').addEventListener('click', () => navMonth(-1));
-  document.getElementById('btn-next-month').addEventListener('click', () => navMonth(+1));
-
-  // Search
-  document.getElementById('search-input').addEventListener('input', e => {
-    searchQuery = e.target.value.trim().toLowerCase();
-    renderTable();
-  });
-
-  // New Record
-  document.getElementById('btn-new').addEventListener('click', () => openModal(null));
-
-  // Export
-  document.getElementById('btn-export').addEventListener('click', exportCSV);
-
-  // Backfill
-  document.getElementById('btn-backfill').addEventListener('click', runBackfill);
-
-  // Modal
-  document.getElementById('modal-overlay').addEventListener('click', e => {
-    if (e.target === e.currentTarget) closeModal();
-  });
-  document.getElementById('modal-close').addEventListener('click', closeModal);
-  document.getElementById('modal-cancel').addEventListener('click', closeModal);
-  document.getElementById('modal-save').addEventListener('click', saveModal);
-  document.getElementById('m-unit').addEventListener('change', updateModalAreas);
-}
-
-// ── MONTH LIST ────────────────────────────────────────────────────────────────
-function buildMonthList() {
-  const unitRecs = allRecords.filter(r => r.unit === activeUnit);
-  const months = new Set(unitRecs.map(r => mkKey(r.date)));
-  monthList = [...months].filter(Boolean).sort();
-
-  // Ensure current month exists in list
-  const today = todayStr();
-  const cur = mkKey(today);
-  if (!months.has(cur)) monthList.push(cur);
-  monthList.sort();
-
-  // Validate activeMonth
-  if (!monthList.includes(activeMonth)) {
-    activeMonth = monthList[monthList.length - 1] || cur;
-  }
-}
-
-function navMonth(dir) {
-  const idx = monthList.indexOf(activeMonth);
-  const next = idx + dir;
-  if (next >= 0 && next < monthList.length) {
-    activeMonth = monthList[next];
-    renderAll();
-  }
-}
-
-// ── CHECK TODAY ───────────────────────────────────────────────────────────────
+// ── CHECK TODAY — auto-generate entries for today if missing ──────────────────
 function checkAndGenerateToday() {
   const today = todayStr();
   UNITS.forEach(unit => {
-    if (!allRecords.some(r => r.date === today && r.unit === unit)) {
+    const hasTodayEntries = allRecords.some(r => r.date === today && (r.unit || 'Unit 11') === unit);
+    if (!hasTodayEntries) {
       const entries = generateDayEntries(today).filter(e => e.unit === unit);
       batchSaveRecords(entries).catch(console.error);
     }
   });
 }
 
+// ── DATE CONTROLS ────────────────────────────────────────────────────────────
+window.setToday = function() {
+  activeDate = todayStr();
+  const btnToday = document.getElementById('btn-today');
+  const datePicker = document.getElementById('date-picker');
+  const pickerBtn = document.querySelector('.date-picker-btn');
+  if (btnToday)   btnToday.classList.add('active');
+  if (datePicker) datePicker.value = '';
+  if (pickerBtn)  { pickerBtn.classList.remove('has-date'); pickerBtn.querySelector('span').textContent = 'Select Date'; }
+  renderAll();
+};
+
+// ── UNIT CONTROL ─────────────────────────────────────────────────────────────
+window.setActiveUnit = function(unit) {
+  activeUnit = unit;
+  localStorage.setItem('rc_active_unit', unit);
+  document.getElementById('unit-btn-11')?.classList.toggle('active', unit === 'Unit 11');
+  document.getElementById('unit-btn-12')?.classList.toggle('active', unit === 'Unit 12');
+  renderAll();
+};
+
 // ── RENDER ALL ────────────────────────────────────────────────────────────────
 function renderAll() {
   renderStatCards();
-  renderFilterBar();
+  renderDateHeading();
   renderTable();
   renderNavBadge();
 }
 
 function renderNavBadge() {
-  const unitRecs = allRecords.filter(r => r.unit === activeUnit);
-  document.getElementById('nav-badge').textContent = unitRecs.length;
+  const unitRecs = allRecords.filter(r => (r.unit || 'Unit 11') === activeUnit);
+  const el = document.getElementById('nav-count');
+  if (el) el.textContent = unitRecs.length;
 }
 
 // ── STAT CARDS ────────────────────────────────────────────────────────────────
 function renderStatCards() {
-  const unitRecs = allRecords.filter(r => r.unit === activeUnit && mkKey(r.date) === activeMonth);
-  const racks = new Set(unitRecs.map(r => r.rackId)).size;
+  const unitRecs = allRecords.filter(r => (r.unit || 'Unit 11') === activeUnit);
+  const todayRecs = unitRecs.filter(r => r.date === todayStr());
+  const racks = new Set(todayRecs.map(r => r.rackId)).size;
+
   document.getElementById('stat-total').textContent   = unitRecs.length;
   document.getElementById('stat-racks').textContent   = racks;
-  document.getElementById('stat-pending').textContent = 0; // all auto-done
-  document.getElementById('stat-month').textContent   = monthLabel(activeMonth).split(' ')[0];
+  document.getElementById('stat-pending').textContent = 0; // all auto-generated = done
+
+  // Period card
+  const isToday = activeDate === todayStr();
+  const periodEl = document.getElementById('stat-period');
+  const periodSub = document.getElementById('stat-period-sub');
+  if (periodEl) {
+    if (isToday) {
+      periodEl.textContent = 'Today';
+    } else {
+      const d = new Date(activeDate + 'T00:00:00');
+      periodEl.textContent = d.toLocaleDateString('en-IN', { day:'numeric', month:'short' });
+    }
+  }
+  if (periodSub) periodSub.textContent = 'Current Period';
 }
 
-// ── FILTER BAR ────────────────────────────────────────────────────────────────
-function renderFilterBar() {
-  document.getElementById('filter-month-title').textContent = monthLabel(activeMonth);
+// ── DATE HEADING ──────────────────────────────────────────────────────────────
+function renderDateHeading() {
+  const headingEl = document.getElementById('records-date-heading');
+  const subEl     = document.getElementById('records-date-sub');
+  const isToday   = activeDate === todayStr();
 
-  const unitRecs = allRecords.filter(r => r.unit === activeUnit && mkKey(r.date) === activeMonth);
-  const daysCount = new Set(unitRecs.map(r => r.date)).size;
-  const r1 = unitRecs.filter(r => r.rackId === 'Rack 1').length;
-  const r2 = unitRecs.filter(r => r.rackId === 'Rack 2').length;
-  const r3 = unitRecs.filter(r => r.rackId === 'Rack 3').length;
-
-  document.getElementById('filter-chips').innerHTML = `
-    <div class="filter-chip">🗓️ ${daysCount} days</div>
-    <div class="filter-chip">📋 ${unitRecs.length} entries</div>
-    <div class="filter-chip"><span class="chip-rack chip-r1">Rack 1:</span>&nbsp;<b>${r1}</b></div>
-    <div class="filter-chip"><span class="chip-rack chip-r2">Rack 2:</span>&nbsp;<b>${r2}</b></div>
-    <div class="filter-chip"><span class="chip-rack chip-r3">Rack 3:</span>&nbsp;<b>${r3}</b></div>
-  `;
+  if (headingEl) {
+    headingEl.textContent = isToday ? "Today's Cleaning Records" : fmtDateLong(activeDate);
+  }
+  if (subEl) {
+    subEl.textContent = isToday ? fmtDateLong(todayStr()) : '';
+  }
 }
 
 // ── TABLE ─────────────────────────────────────────────────────────────────────
 function renderTable() {
   let recs = allRecords.filter(r =>
-    r.unit === activeUnit && mkKey(r.date) === activeMonth
+    (r.unit || 'Unit 11') === activeUnit && r.date === activeDate
   );
 
   if (searchQuery) {
+    const q = searchQuery.toLowerCase();
     recs = recs.filter(r =>
-      (r.date || '').includes(searchQuery) ||
-      (r.rackId || '').toLowerCase().includes(searchQuery) ||
-      (r.area || '').toLowerCase().includes(searchQuery) ||
-      (r.checkedBy || '').toLowerCase().includes(searchQuery) ||
-      (r.method || '').toLowerCase().includes(searchQuery) ||
-      (r.remarks || '').toLowerCase().includes(searchQuery)
+      (r.date || '').includes(q) ||
+      (r.rackId || '').toLowerCase().includes(q) ||
+      (r.area || '').toLowerCase().includes(q) ||
+      (r.checkedBy || '').toLowerCase().includes(q) ||
+      (r.method || '').toLowerCase().includes(q) ||
+      (r.remarks || '').toLowerCase().includes(q)
     );
   }
 
-  recs.sort((a, b) => {
-    const d = b.date.localeCompare(a.date);
-    return d !== 0 ? d : (a.cleaningTime || '').localeCompare(b.cleaningTime || '');
-  });
+  // Sort by time ascending
+  recs.sort((a, b) => (a.cleaningTime || '').localeCompare(b.cleaningTime || ''));
 
   const tbody = document.getElementById('records-tbody');
   if (!recs.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="empty-state">No records for ${monthLabel(activeMonth)}.<br><small style="margin-top:6px;display:block;">Use the backfill button to generate historical data.</small></td></tr>`;
+    const msg = searchQuery
+      ? `No records match "${searchQuery}".`
+      : `No records for ${activeDate === todayStr() ? 'today' : fmtDate(activeDate)}.`;
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40" style="opacity:.25;margin-bottom:10px">
+        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+        <rect x="9" y="3" width="6" height="4" rx="1"/>
+        <path d="M9 12h6M9 16h4"/>
+      </svg>
+      <div>${msg}</div>
+    </td></tr>`;
     return;
   }
 
   tbody.innerHTML = recs.map((r, i) => {
-    const rackClass = 'rack-' + (r.rackId || '').replace(' ', '').toLowerCase();
-    const mClass = methodClass(r.method);
-    const mIcon  = methodIcon(r.method);
+    const rackKey   = (r.rackId || '').replace(/\s+/g, '').toLowerCase(); // 'rack1','rack2','rack3'
+    const rackClass = 'rack-' + rackKey;
+    const mClass    = methodClass(r.method);
+    const mIcon     = methodSVG(r.method);
     return `<tr>
       <td>${i + 1}</td>
       <td>${fmtDate(r.date)}</td>
       <td><span class="rack-badge ${rackClass}">${r.rackId || '—'}</span></td>
       <td>${r.area || '—'}</td>
-      <td><span class="td-time"><span class="time-icon">🕐</span>${r.cleaningTime || '—'}</span></td>
-      <td><span class="method-badge ${mClass}">${mIcon} ${r.method || '—'}</span></td>
+      <td><span class="td-time">${clockSVG()}${r.cleaningTime || '—'}</span></td>
+      <td><span class="method-badge ${mClass}">${mIcon}${r.method || '—'}</span></td>
       <td>${r.checkedBy || '—'}</td>
-      <td style="color:#6b7280;font-size:11px;max-width:200px;">${r.remarks || '—'}</td>
+      <td class="td-remarks">${r.remarks || '—'}</td>
       <td>
-        <button class="btn-edit-row" title="Edit" onclick="openEditRecord('${r.id}')">✏️</button>
-        <button class="btn-del-row"  title="Delete" onclick="confirmDelete('${r.id}')">🗑️</button>
+        <div class="action-btns">
+          <button class="action-btn" title="Edit" onclick="openEditRecord('${r.id}')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="action-btn del" title="Delete" onclick="confirmDelete('${r.id}')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          </button>
+        </div>
       </td>
     </tr>`;
   }).join('');
@@ -266,14 +237,14 @@ function openModal(id) {
   document.getElementById('modal-title').textContent = id ? 'Edit Cleaning Record' : 'New Cleaning Record';
 
   const form = document.getElementById('modal-form');
-  form['m-date'].value      = rec?.date        || todayStr();
-  form['m-unit'].value      = rec?.unit        || activeUnit;
-  form['m-rackId'].value    = rec?.rackId      || 'Rack 1';
-  form['m-time'].value      = rec?.cleaningTime|| '';
+  form['m-date'].value      = rec?.date         || activeDate;
+  form['m-unit'].value      = rec?.unit         || activeUnit;
+  form['m-rackId'].value    = rec?.rackId       || 'Rack 1';
+  form['m-time'].value      = rec?.cleaningTime || '';
   form['m-done'].checked    = rec?.cleaningDone !== false;
-  form['m-method'].value    = rec?.method      || 'Dry Wipe';
-  form['m-checkedBy'].value = rec?.checkedBy   || '';
-  form['m-remarks'].value   = rec?.remarks     || '';
+  form['m-method'].value    = rec?.method       || 'Dry Wipe';
+  form['m-checkedBy'].value = rec?.checkedBy    || '';
+  form['m-remarks'].value   = rec?.remarks      || '';
 
   updateModalAreas();
   if (rec?.area) {
@@ -288,7 +259,6 @@ function updateModalAreas() {
   const areas = UNIT_AREAS[unit] || [];
   document.getElementById('m-area').innerHTML =
     areas.map(a => `<option value="${a}">${a}</option>`).join('');
-  // Staff datalist
   const staff = STAFF[unit] || [];
   document.getElementById('dl-staff').innerHTML =
     staff.map(s => `<option value="${s}">`).join('');
@@ -302,15 +272,15 @@ function closeModal() {
 async function saveModal() {
   const form = document.getElementById('modal-form');
   const data = {
-    date:         form['m-date'].value,
-    unit:         form['m-unit'].value,
-    rackId:       form['m-rackId'].value,
-    area:         form['m-area'].value,
-    cleaningTime: form['m-time'].value,
-    cleaningDone: form['m-done'].checked,
-    method:       form['m-method'].value,
-    checkedBy:    form['m-checkedBy'].value.trim(),
-    remarks:      form['m-remarks'].value.trim(),
+    date:          form['m-date'].value,
+    unit:          form['m-unit'].value,
+    rackId:        form['m-rackId'].value,
+    area:          form['m-area'].value,
+    cleaningTime:  form['m-time'].value,
+    cleaningDone:  form['m-done'].checked,
+    method:        form['m-method'].value,
+    checkedBy:     form['m-checkedBy'].value.trim(),
+    remarks:       form['m-remarks'].value.trim(),
     autoGenerated: false,
   };
   if (!data.date || !data.rackId || !data.unit) {
@@ -320,12 +290,26 @@ async function saveModal() {
   btn.disabled = true; btn.textContent = 'Saving…';
   try {
     if (editingId) { await updateRecord(editingId, data); showToast('Updated ✓'); }
-    else           { await saveRecord(data); showToast('Saved ✓'); }
+    else           { await saveRecord(data);              showToast('Saved ✓'); }
     closeModal();
-    activeUnit  = data.unit;
-    activeMonth = mkKey(data.date);
-    document.querySelectorAll('.unit-btn').forEach(b =>
-      b.classList.toggle('active', b.dataset.unit === activeUnit));
+    // Switch unit + date to match saved record
+    activeUnit = data.unit;
+    activeDate = data.date;
+    localStorage.setItem('rc_active_unit', activeUnit);
+    // Sync unit buttons
+    document.getElementById('unit-btn-11')?.classList.toggle('active', activeUnit === 'Unit 11');
+    document.getElementById('unit-btn-12')?.classList.toggle('active', activeUnit === 'Unit 12');
+    // Sync date controls
+    const btnToday = document.getElementById('btn-today');
+    const datePicker = document.getElementById('date-picker');
+    const pickerBtn  = document.querySelector('.date-picker-btn');
+    const isToday = activeDate === todayStr();
+    if (btnToday)    btnToday.classList.toggle('active', isToday);
+    if (datePicker)  datePicker.value = isToday ? '' : activeDate;
+    if (pickerBtn) {
+      pickerBtn.classList.toggle('has-date', !isToday);
+      pickerBtn.querySelector('span').textContent = isToday ? 'Select Date' : fmtDate(activeDate);
+    }
   } catch (e) {
     console.error(e);
     showToast('Error saving.', 'error');
@@ -337,79 +321,117 @@ async function saveModal() {
 // ── DELETE ────────────────────────────────────────────────────────────────────
 window.confirmDelete = function(id) {
   const rec = allRecords.find(r => r.id === id);
-  if (!confirm(`Delete record for ${fmtDate(rec?.date)} ${rec?.rackId || ''}?`)) return;
+  if (!confirm(`Delete record for ${fmtDate(rec?.date)} – ${rec?.rackId || ''}?`)) return;
   deleteRecord(id)
     .then(() => showToast('Deleted.'))
     .catch(() => showToast('Delete failed.', 'error'));
 };
 
-// ── EXPORT CSV ────────────────────────────────────────────────────────────────
+// ── EXPORT ────────────────────────────────────────────────────────────────────
 function exportCSV() {
+  // Export all records for selected unit (all time)
   const recs = allRecords
-    .filter(r => r.unit === activeUnit && mkKey(r.date) === activeMonth)
+    .filter(r => (r.unit || 'Unit 11') === activeUnit)
     .sort((a,b) => a.date.localeCompare(b.date) || (a.cleaningTime||'').localeCompare(b.cleaningTime||''));
 
   const header = ['#','Date','Unit','Rack','Area','Time','Done','Method','Checked By','Remarks'];
-  const rows   = recs.map((r,i) => [i+1, fmtDate(r.date), r.unit, r.rackId, r.area,
-    r.cleaningTime, r.cleaningDone?'Yes':'No', r.method, r.checkedBy, r.remarks]
-    .map(v => `"${String(v||'').replace(/"/g,'""')}"`));
+  const rows   = recs.map((r, i) => [
+    i+1, fmtDate(r.date), r.unit, r.rackId, r.area,
+    r.cleaningTime, r.cleaningDone ? 'Yes' : 'No',
+    r.method, r.checkedBy, r.remarks
+  ].map(v => `"${String(v||'').replace(/"/g,'""')}"`));
 
   const csv  = [header, ...rows].map(r => r.join(',')).join('\n');
-  const blob = new Blob([csv], { type:'text/csv' });
+  const blob = new Blob([csv], { type: 'text/csv' });
   const a    = Object.assign(document.createElement('a'), {
-    href: URL.createObjectURL(blob),
-    download: `RackCleaning_${activeUnit.replace(' ','')}_${activeMonth}.csv`
+    href:     URL.createObjectURL(blob),
+    download: `RackCleaning_${activeUnit.replace(' ','')}_${todayStr()}.csv`
   });
-  a.click(); URL.revokeObjectURL(a.href);
+  a.click();
+  URL.revokeObjectURL(a.href);
   showToast('Exported ✓');
 }
 
-// ── SETTINGS TOGGLE ───────────────────────────────────────────────────────────
+// ── SETTINGS ──────────────────────────────────────────────────────────────────
 window.toggleSettings = function() {
   const p = document.getElementById('settings-panel');
   p.style.display = p.style.display === 'none' ? 'block' : 'none';
 };
 
-// ── BACKFILL ──────────────────────────────────────────────────────────────────
-async function runBackfill() {
-  if (!confirm('Generate all records from 1 April 2026 to yesterday?\nExisting records will NOT be overwritten.')) return;
+// ── SIDEBAR TOGGLE (mobile) ───────────────────────────────────────────────────
+window.toggleSidebar = function() {
+  document.getElementById('sidebar')?.classList.toggle('open');
+};
 
-  const btn  = document.getElementById('btn-backfill');
-  const prog = document.getElementById('backfill-progress');
-  btn.disabled = true; btn.textContent = '⏳ Working…';
-  prog.style.display = 'block';
-  prog.textContent   = 'Building entry list…';
+// ── INIT ───────────────────────────────────────────────────────────────────────
+function init() {
+  updateCloudBadge();
+  showLoader(true);
 
-  try {
-    const yest = yesterday();
-    const allEntries = generateDateRange('2026-04-01', yest);
+  // Restore unit from storage
+  const storedUnit = localStorage.getItem('rc_active_unit') || 'Unit 11';
+  activeUnit = storedUnit;
+  document.getElementById('unit-btn-11')?.classList.toggle('active', activeUnit === 'Unit 11');
+  document.getElementById('unit-btn-12')?.classList.toggle('active', activeUnit === 'Unit 12');
 
-    const existingKeys = new Set(allRecords.map(r => r.date + '_' + r.unit));
-    const toSave = allEntries.filter(e => !existingKeys.has(e.date + '_' + e.unit));
-
-    if (!toSave.length) {
-      prog.textContent = '✅ All historical data already exists!';
-      showToast('Already up to date ✓'); return;
-    }
-
-    const CHUNK = 400;
-    let saved = 0;
-    for (let i = 0; i < toSave.length; i += CHUNK) {
-      await batchSaveRecords(toSave.slice(i, i + CHUNK));
-      saved += Math.min(CHUNK, toSave.length - i);
-      prog.textContent = `⏳ Saved ${saved} / ${toSave.length} records…`;
-    }
-
-    prog.textContent = `✅ Done! ${saved} records added (Apr 2026 – ${yest}).`;
-    showToast(`Backfill complete: ${saved} records ✓`);
-  } catch (err) {
-    console.error(err);
-    prog.textContent = '❌ Error during backfill. See console.';
-    showToast('Backfill failed.', 'error');
-  } finally {
-    btn.disabled = false; btn.textContent = '📥 Backfill Apr–Today';
-    setTimeout(() => { prog.style.display = 'none'; }, 8000);
+  // Default date = today
+  activeDate = todayStr();
+  const btnToday = document.getElementById('btn-today');
+  if (btnToday) {
+    btnToday.classList.add('active');
+    btnToday.addEventListener('click', window.setToday);
   }
+
+  // Date picker
+  const datePicker = document.getElementById('date-picker');
+  if (datePicker) {
+    datePicker.max = todayStr();
+    datePicker.addEventListener('change', e => {
+      if (!e.target.value) return;
+      activeDate = e.target.value;
+      const btnT = document.getElementById('btn-today');
+      const pBtn = document.querySelector('.date-picker-btn');
+      if (btnT) btnT.classList.remove('active');
+      if (pBtn) {
+        pBtn.classList.add('has-date');
+        pBtn.querySelector('span').textContent = fmtDate(activeDate);
+      }
+      renderAll();
+    });
+  }
+
+  // Unit buttons
+  document.getElementById('unit-btn-11')?.addEventListener('click', () => window.setActiveUnit('Unit 11'));
+  document.getElementById('unit-btn-12')?.addEventListener('click', () => window.setActiveUnit('Unit 12'));
+
+  // Search
+  document.getElementById('search-input')?.addEventListener('input', e => {
+    searchQuery = e.target.value.trim().toLowerCase();
+    renderTable();
+  });
+
+  // New Record
+  document.getElementById('btn-new')?.addEventListener('click', () => openModal(null));
+
+  // Export
+  document.getElementById('btn-export')?.addEventListener('click', exportCSV);
+
+  // Modal events
+  document.getElementById('modal-overlay')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeModal();
+  });
+  document.getElementById('modal-close')?.addEventListener('click', closeModal);
+  document.getElementById('modal-cancel')?.addEventListener('click', closeModal);
+  document.getElementById('modal-save')?.addEventListener('click', saveModal);
+  document.getElementById('m-unit')?.addEventListener('change', updateModalAreas);
+
+  // Subscribe Firestore
+  subscribeRecords(records => {
+    allRecords = records;
+    checkAndGenerateToday();
+    renderAll();
+    showLoader(false);
+  });
 }
 
 // ── START ─────────────────────────────────────────────────────────────────────
