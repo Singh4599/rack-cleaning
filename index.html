@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rack Cleaning Record — 365 Spicery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- Loader Bar -->
+<div id="loader-bar" class="loader-bar" style="display:none;"></div>
+
+<div class="shell">
+
+  <!-- ═══════════════════════════════════ SIDEBAR -->
+  <aside class="sidebar">
+    <!-- Logo -->
+    <div class="sidebar-logo">
+      <div class="logo-icon">
+        <img src="https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f33f.png" onerror="this.style.display='none';this.nextSibling.style.display='block'" alt="">
+        <span style="display:none;font-size:20px;">🧹</span>
+      </div>
+      <div class="logo-text">
+        <div class="logo-brand">365 Spicery</div>
+        <div class="logo-sub">RACK CLEANING RECORD</div>
+      </div>
+    </div>
+
+    <!-- Nav -->
+    <nav class="sidebar-nav">
+      <div class="nav-item active" id="nav-cleaning">
+        <span class="nav-icon">🧹</span>
+        <span class="nav-label">Rack Cleaning</span>
+        <span class="nav-badge" id="nav-badge">0</span>
+      </div>
+    </nav>
+
+    <!-- Unit toggle inside sidebar -->
+    <div class="sidebar-unit-section">
+      <div class="sidebar-unit-label">UNIT</div>
+      <div class="unit-toggle">
+        <button class="unit-btn active" data-unit="Unit 11">Unit 11</button>
+        <button class="unit-btn" data-unit="Unit 12">Unit 12</button>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="sidebar-bottom">
+      <div class="nav-item" id="nav-settings" onclick="toggleSettings()">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-label">Settings</span>
+      </div>
+      <!-- Spice decorative image -->
+      <div class="sidebar-spice">
+        <img src="https://images.unsplash.com/photo-1596040033229-a9821ebd058d?w=200&q=80" 
+             onerror="this.style.display='none'" alt="spices">
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══════════════════════════════════ MAIN -->
+  <div class="main-wrap">
+
+    <!-- Top bar -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <h1 class="page-title">Rack Cleaning Record</h1>
+        <div id="cloud-badge" class="cloud-badge online">☁️ Cloud Synced</div>
+      </div>
+      <div class="topbar-right">
+        <button id="btn-new" class="btn btn-primary">+ New Record</button>
+        <button id="btn-export" class="btn btn-outline">⬇ Export</button>
+        <div class="avatar">DS</div>
+      </div>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="stat-cards" id="stat-cards">
+      <div class="stat-card">
+        <div class="stat-icon stat-icon-red">📋</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stat-total">0</div>
+          <div class="stat-label">Total Records</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon stat-icon-green">✨</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stat-racks">0</div>
+          <div class="stat-label">Racks Cleaned</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon stat-icon-orange">🕐</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stat-pending">0</div>
+          <div class="stat-label">Pending</div>
+        </div>
+      </div>
+      <div class="stat-card stat-card-purple">
+        <div class="stat-icon stat-icon-purple">📅</div>
+        <div class="stat-body">
+          <div class="stat-value stat-month" id="stat-month">—</div>
+          <div class="stat-label">Current Period</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Month / filter bar -->
+    <div class="filter-bar">
+      <div class="filter-bar-left">
+        <h2 id="filter-month-title" class="filter-month-title">—</h2>
+        <div class="month-nav">
+          <button class="month-nav-btn" id="btn-prev-month">‹</button>
+          <button class="month-nav-btn" id="btn-next-month">›</button>
+        </div>
+        <div class="filter-chips" id="filter-chips"></div>
+      </div>
+      <div class="filter-bar-right">
+        <input type="text" id="search-input" class="search-input" placeholder="🔍 Search…">
+        <button id="btn-backfill" class="btn btn-outline btn-sm">📥 Backfill Apr–Today</button>
+      </div>
+    </div>
+
+    <!-- Backfill progress -->
+    <div id="backfill-progress" class="backfill-progress" style="display:none;"></div>
+
+    <!-- Settings panel (hidden by default) -->
+    <div id="settings-panel" class="settings-panel" style="display:none;">
+      <h3>Settings</h3>
+      <p style="font-size:12px;color:#6b7280;">Firebase Project: <b>rack-af013</b> &nbsp;|&nbsp; Collection: <b>rackCleaningRecords</b></p>
+      <p style="font-size:12px;color:#6b7280;margin-top:4px;">Auto-generates today's entries on load. Historical data can be generated via Backfill button.</p>
+    </div>
+
+    <!-- Table -->
+    <div class="table-card">
+      <table class="records-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Date</th>
+            <th>Rack</th>
+            <th>Area / Section</th>
+            <th>Time</th>
+            <th>Method</th>
+            <th>Checked By</th>
+            <th>Remarks</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="records-tbody">
+          <tr><td colspan="9" class="empty-state">⏳ Loading records…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div><!-- /main-wrap -->
+</div><!-- /shell -->
+
+<!-- ═══════════════════════════════════ MODAL -->
+<div id="modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">New Cleaning Record</h3>
+      <button id="modal-close" class="modal-close">✕</button>
+    </div>
+    <form id="modal-form" class="modal-form" onsubmit="return false;">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Date <span class="req">*</span></label>
+          <input type="date" name="m-date" id="m-date" required>
+        </div>
+        <div class="form-group">
+          <label>Unit <span class="req">*</span></label>
+          <select name="m-unit" id="m-unit" required>
+            <option value="Unit 11">Unit 11</option>
+            <option value="Unit 12">Unit 12</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Rack ID <span class="req">*</span></label>
+          <select name="m-rackId" id="m-rackId" required>
+            <option value="Rack 1">Rack 1</option>
+            <option value="Rack 2">Rack 2</option>
+            <option value="Rack 3">Rack 3</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Cleaning Time</label>
+          <input type="time" name="m-time" id="m-time">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Area / Section <span class="req">*</span></label>
+        <select name="m-area" id="m-area" required></select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Method</label>
+          <select name="m-method" id="m-method">
+            <option>Dusting</option>
+            <option>Dry Wipe</option>
+            <option>Wet Wipe</option>
+            <option>Sweep &amp; Wipe</option>
+            <option>Sanitize &amp; Wipe</option>
+            <option>Vacuum &amp; Wipe</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Cleaning Done</label>
+          <label class="check-label">
+            <input type="checkbox" name="m-done" id="m-done" checked>
+            <span>✓ Completed</span>
+          </label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Checked By</label>
+        <input type="text" name="m-checkedBy" id="m-checkedBy" list="dl-staff" placeholder="Staff name…" autocomplete="off">
+        <datalist id="dl-staff"></datalist>
+      </div>
+      <div class="form-group">
+        <label>Remarks</label>
+        <textarea name="m-remarks" id="m-remarks" rows="3" placeholder="OK – No issues found…"></textarea>
+      </div>
+    </form>
+    <div class="modal-footer">
+      <button id="modal-cancel" class="btn btn-outline">Cancel</button>
+      <button id="modal-save" class="btn btn-primary">Save Record</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<script type="module" src="js/app.js?v=3"></script>
+</body>
+</html>
