@@ -1,5 +1,5 @@
 import { saveRecord, updateRecord, deleteRecord, batchSaveRecords, subscribeRecords } from './firebase-config.js';
-import { generateDayEntries, generateDateRange, todayStr, UNITS, UNIT_AREAS, STAFF } from './auto-generate.js';
+import { generateDayEntries, generateDateRange, todayStr, UNITS, STAFF } from './auto-generate.js';
 
 // ── STATE ──────────────────────────────────────────────────────────────────────
 let allRecords  = [];
@@ -240,7 +240,6 @@ function renderTable() {
     recs = recs.filter(r =>
       (r.date || '').includes(q) ||
       (r.rackId || '').toLowerCase().includes(q) ||
-      (r.area || '').toLowerCase().includes(q) ||
       (r.checkedBy || '').toLowerCase().includes(q) ||
       (r.method || '').toLowerCase().includes(q) ||
       (r.remarks || '').toLowerCase().includes(q)
@@ -255,7 +254,7 @@ function renderTable() {
     const msg = searchQuery
       ? `No records match "${searchQuery}".`
       : `No records for ${activeDate === todayStr() ? 'today' : fmtDate(activeDate)}.`;
-    tbody.innerHTML = `<tr><td colspan="9" class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40" style="opacity:.25;margin-bottom:10px">
         <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
         <rect x="9" y="3" width="6" height="4" rx="1"/>
@@ -275,7 +274,6 @@ function renderTable() {
       <td>${i + 1}</td>
       <td>${fmtDate(r.date)}</td>
       <td><span class="rack-badge ${rackClass}">${r.rackId || '—'}</span></td>
-      <td>${r.area || '—'}</td>
       <td><span class="td-time">${clockSVG()}${r.cleaningTime || '—'}</span></td>
       <td><span class="method-badge ${mClass}">${mIcon}${r.method || '—'}</span></td>
       <td>${r.checkedBy || '—'}</td>
@@ -312,19 +310,12 @@ function openModal(id) {
   form['m-checkedBy'].value = rec?.checkedBy    || '';
   form['m-remarks'].value   = rec?.remarks      || '';
 
-  updateModalAreas();
-  if (rec?.area) {
-    setTimeout(() => { form['m-area'].value = rec.area; }, 0);
-  }
-
+  updateModalStaff();
   document.getElementById('modal-overlay').classList.add('open');
 }
 
-function updateModalAreas() {
+function updateModalStaff() {
   const unit  = document.getElementById('m-unit').value;
-  const areas = UNIT_AREAS[unit] || [];
-  document.getElementById('m-area').innerHTML =
-    areas.map(a => `<option value="${a}">${a}</option>`).join('');
   const staff = STAFF[unit] || [];
   document.getElementById('dl-staff').innerHTML =
     staff.map(s => `<option value="${s}">`).join('');
@@ -341,7 +332,6 @@ async function saveModal() {
     date:          form['m-date'].value,
     unit:          form['m-unit'].value,
     rackId:        form['m-rackId'].value,
-    area:          form['m-area'].value,
     cleaningTime:  form['m-time'].value,
     cleaningDone:  form['m-done'].checked,
     method:        form['m-method'].value,
@@ -391,9 +381,9 @@ function exportCSV() {
     .filter(r => (r.unit || 'Unit 11') === activeUnit)
     .sort((a,b) => a.date.localeCompare(b.date) || (a.cleaningTime||'').localeCompare(b.cleaningTime||''));
 
-  const header = ['#','Date','Unit','Rack','Area','Time','Done','Method','Checked By','Remarks'];
+  const header = ['#','Date','Unit','Rack','Time','Done','Method','Checked By','Remarks'];
   const rows   = recs.map((r, i) => [
-    i+1, fmtDate(r.date), r.unit, r.rackId, r.area,
+    i+1, fmtDate(r.date), r.unit, r.rackId,
     r.cleaningTime, r.cleaningDone ? 'Yes' : 'No',
     r.method, r.checkedBy, r.remarks
   ].map(v => `"${String(v||'').replace(/"/g,'""')}"`));
@@ -499,14 +489,13 @@ function printRackRecords(dates) {
           <td style="text-align:center;color:#6b7280;font-weight:700">${i+1}</td>
           <td style="white-space:nowrap;font-weight:600">${esc(dateStr)}</td>
           <td><span style="background:${rackBg[r.rackId]||'#f3f4f6'};color:${rackColor[r.rackId]||'#374151'};padding:2pt 7pt;border-radius:4pt;font-size:7pt;font-weight:800;-webkit-print-color-adjust:exact;print-color-adjust:exact">${esc(r.rackId)}</span></td>
-          <td>${esc(r.area)}</td>
-          <td style="text-align:center;font-variant-numeric:tabular-nums;font-weight:600">${esc(r.cleaningTime)}</td>
+          <td>${esc(r.cleaningTime)}</td>
           <td>${esc(r.method)}</td>
           <td style="text-align:center"><span style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:1.5pt 5pt;border-radius:3pt;font-size:6.5pt;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact">${r.cleaningDone!==false?'\u2713 YES':'\u2717 NO'}</span></td>
           <td>${esc(r.checkedBy)}</td>
           <td style="color:#6b7280;font-size:7.5pt">${esc(r.remarks)}</td>
         </tr>`).join('')
-      : `<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:20pt;font-style:italic">No records for this date</td></tr>`;
+      : `<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:20pt;font-style:italic">No records for this date</td></tr>`;
 
     return `<div style="page-break-after:${pi<dates.length-1?'always':'avoid'}">
 <div style="border:2pt solid #000;padding:6pt 10pt;margin-bottom:6pt">
@@ -528,8 +517,8 @@ function printRackRecords(dates) {
 <table>
   <thead><tr>
     <th style="width:4%;text-align:center">SR.</th><th style="width:9%">DATE</th>
-    <th style="width:8%">RACK</th><th style="width:22%">AREA / SECTION</th>
-    <th style="width:7%;text-align:center">TIME</th><th style="width:13%">METHOD</th>
+    <th style="width:8%">RACK</th>
+    <th style="width:7%;text-align:center">TIME</th><th style="width:15%">METHOD</th>
     <th style="width:8%;text-align:center">DONE</th><th style="width:14%">CHECKED BY</th>
     <th>REMARKS</th>
   </tr></thead>
@@ -641,7 +630,7 @@ function init() {
   document.getElementById('modal-close')?.addEventListener('click', closeModal);
   document.getElementById('modal-cancel')?.addEventListener('click', closeModal);
   document.getElementById('modal-save')?.addEventListener('click', saveModal);
-  document.getElementById('m-unit')?.addEventListener('change', updateModalAreas);
+  document.getElementById('m-unit')?.addEventListener('change', updateModalStaff);
 
   // Print button
   document.getElementById('btn-print')?.addEventListener('click', openPrintModal);

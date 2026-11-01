@@ -1,5 +1,4 @@
 // ── SEEDED RANDOM ──────────────────────────────────────────────────────────────
-// Deterministic random from seed (same seed = same results always)
 function seeded(seed) {
   let t = (seed ^ 0x6D2B79F5) >>> 0;
   return function() {
@@ -12,53 +11,22 @@ function seeded(seed) {
 function pick(rng, arr) { return arr[Math.floor(rng() * arr.length)]; }
 function randInt(rng, min, max) { return Math.floor(rng() * (max - min + 1)) + min; }
 function pad(n) { return String(n).padStart(2, '0'); }
-function randTime(rng, hMin, hMax, mMin = 0, mMax = 59) {
-  const h = randInt(rng, hMin, hMax);
-  // If h === hMax, limit minutes
-  const mLimit = (h === hMax) ? Math.min(mMax, 59) : 59;
-  const m = randInt(rng, 0, mLimit);
-  return `${pad(h)}:${pad(m)}`;
-}
 
-// ── CONSTANTS ──────────────────────────────────────────────────────────────────
-const UNITS = ['Unit 11', 'Unit 12'];
+// Round minutes to nearest 5 or 0
+function roundToFive(m) { return Math.round(m / 5) * 5; }
 
-const UNIT_AREAS = {
-  'Unit 11': ['Whole Spices Section', 'Ground Masala Rack', 'Blended Products Bay', 'Retail Packets Area', 'Raw Spice Storage'],
-  'Unit 12': ['Processing Bay', 'Packaging Station', 'Finished Goods Area', 'Dispatch Section', 'Quality Check Area'],
-};
-
-const STAFF = {
-  'Unit 11': ['Ramesh Kumar', 'Suresh Patel', 'Amit Verma', 'Deepak Singh', 'Priya Sharma'],
-  'Unit 12': ['Manish Yadav', 'Kavita Sharma', 'Rajesh Meena', 'Santosh Kumar', 'Pooja Verma'],
-};
-
-const METHODS = ['Dusting', 'Dry Wipe', 'Wet Wipe', 'Sweep & Wipe', 'Sanitize & Wipe', 'Vacuum & Wipe'];
-const METHODS_WEIGHTED = ['Dusting', 'Dusting', 'Dry Wipe', 'Dry Wipe', 'Wet Wipe', 'Wet Wipe', 'Sweep & Wipe', 'Sanitize & Wipe', 'Vacuum & Wipe'];
-
-const REMARKS_OK = [
-  'OK – No issues found', 'Cleaned thoroughly', 'Minor dust removed', 'All areas sanitized',
-  'Routine clean done', 'OK – Regular cleaning', 'Sanitized with approved solution',
-  'Rack cleared and wiped', 'OK – Checked & cleaned', 'Clean – no spillage',
-  'All items checked and cleaned', 'Surface wiped, no issues', 'OK – Compliant',
-];
-const REMARKS_ISSUE = [
-  'Minor spill found and cleaned', 'Dust accumulation – cleared',
-  'Old stock residue removed', 'Label fallen – re-attached after cleaning',
-  'Light staining found – sanitized', 'Spillage near base – cleaned',
-];
-
-// Time slots: [hMin, hMax, mMaxForLastHour]
-const TIME_SLOTS = [
-  { label: 'Morning', hMin: 9, hMax: 9, mMin: 0, mMax: 59 },     // 09:xx
-  { label: 'Midday',  hMin: 11, hMax: 12, mMin: 45, mMax: 59 },  // 11:45–12:59
-  { label: 'Evening', hMin: 16, hMax: 16, mMin: 0, mMax: 59 },   // 16:xx
-];
-
+// Pick a random time within slot, rounded to 5/0 minutes
 function pickTimeInSlot(rng, slot) {
   const h = randInt(rng, slot.hMin, slot.hMax);
-  const m = randInt(rng, slot.mMin, slot.mMax);
-  return `${pad(h)}:${pad(m)}`;
+  // Limit minutes for the last hour of a slot
+  const mMax = (h === slot.hMax && slot.mMaxLast !== undefined) ? slot.mMaxLast : 59;
+  const mMin = (h === slot.hMin && slot.mMinFirst !== undefined) ? slot.mMinFirst : 0;
+  const rawMin = randInt(rng, mMin, mMax);
+  let rounded = roundToFive(rawMin);
+  // Clamp to slot bounds
+  if (h === slot.hMax && rounded > mMax) rounded = mMax - (mMax % 5);
+  if (h === slot.hMin && rounded < mMin) rounded = mMin + (5 - mMin % 5) % 5;
+  return `${pad(h)}:${pad(Math.min(rounded, 59))}`;
 }
 
 // Shuffle array using seeded rng
@@ -71,7 +39,57 @@ function shuffle(rng, arr) {
   return a;
 }
 
+// ── CONSTANTS ──────────────────────────────────────────────────────────────────
+const UNITS = ['Unit 11', 'Unit 12'];
+
+// Areas kept for modal form dropdown but NOT used in auto-generate
+const UNIT_AREAS = {
+  'Unit 11': ['Whole Spices Section', 'Ground Masala Rack', 'Blended Products Bay', 'Retail Packets Area', 'Raw Spice Storage'],
+  'Unit 12': ['Processing Bay', 'Packaging Station', 'Finished Goods Area', 'Dispatch Section', 'Quality Check Area'],
+};
+
+// Staff: only Pratap and Anil
+const STAFF = {
+  'Unit 11': ['Pratap', 'Anil'],
+  'Unit 12': ['Pratap', 'Anil'],
+};
+
+const METHODS = ['Dusting', 'Dry Wipe', 'Wet Wipe', 'Sweep & Wipe', 'Sanitize & Wipe', 'Vacuum & Wipe'];
+const METHODS_WEIGHTED = ['Dry Wipe', 'Dry Wipe', 'Wet Wipe', 'Wet Wipe', 'Sweep & Wipe', 'Sanitize & Wipe', 'Vacuum & Wipe'];
+
+// Remarks: clean, no "Sanitized with approved solution"
+const REMARKS_OK = [
+  'OK – No issues found',
+  'Cleaned thoroughly',
+  'Minor dust removed',
+  'Routine clean done',
+  'OK – Regular cleaning',
+  'Rack cleared and wiped',
+  'OK – Checked & cleaned',
+  'Clean – no spillage',
+  'Surface wiped, no issues',
+  'OK – Compliant',
+];
+const REMARKS_ISSUE = [
+  'Minor spill found and cleaned',
+  'Dust accumulation – cleared',
+  'Old stock residue removed',
+  'Light staining found – cleaned',
+  'Spillage near base – cleaned',
+];
+
+// Time slots: one per rack per day
+// Slot A: 09:00–10:00, Slot B: 12:30–13:00, Slot C: 17:30–18:00
+// All rounded to nearest 5 or 0 minutes
+const TIME_SLOTS = [
+  { label: 'Morning', hMin: 9,  hMax: 10, mMinFirst: 0,  mMaxLast: 0   },  // 09:00–10:00
+  { label: 'Midday',  hMin: 12, hMax: 13, mMinFirst: 30, mMaxLast: 0   },  // 12:30–13:00
+  { label: 'Evening', hMin: 17, hMax: 18, mMinFirst: 30, mMaxLast: 0   },  // 17:30–18:00
+];
+
 // ── GENERATE ENTRIES FOR ONE DAY ───────────────────────────────────────────────
+// One entry per rack per day (3 total per unit).
+// Rack 1 → one slot, Rack 2 → another, Rack 3 → third (randomly shuffled each day).
 export function generateDayEntries(dateStr) {
   const dateEpoch = new Date(dateStr + 'T00:00:00').getTime() / 1000;
   const allEntries = [];
@@ -80,67 +98,38 @@ export function generateDayEntries(dateStr) {
     const unitSeed = dateEpoch + ui * 999983;
     const rng = seeded(unitSeed);
 
-    const areas = UNIT_AREAS[unit];
-    const staff = STAFF[unit];
+    const staff = STAFF[unit]; // ['Pratap', 'Anil']
 
-    // Shuffle time slots → assign one slot per rack
-    const slotOrder = shuffle(rng, [0, 1, 2]); // rack i gets slot slotOrder[i]
-
+    // Shuffle time slot order → each rack gets a different slot
+    const slotOrder = shuffle(rng, [0, 1, 2]);
     const racks = ['Rack 1', 'Rack 2', 'Rack 3'];
-    const rackEntries = [];
 
-    racks.forEach((rack, ri) => {
+    const rackEntries = racks.map((rack, ri) => {
       const slot = TIME_SLOTS[slotOrder[ri]];
-      const rackSeed = unitSeed + ri * 31337 + 1;
-      const rng2 = seeded(rackSeed);
+      const rng2 = seeded(unitSeed + ri * 31337 + 1);
 
-      const time1 = pickTimeInSlot(rng2, slot);
+      const time      = pickTimeInSlot(rng2, slot);
       const staffName = pick(rng2, staff);
-      const area = pick(rng2, areas);
-      const method = pick(rng2, METHODS_WEIGHTED);
-      const useIssue = rng2() < 0.08; // 8% chance of minor issue
-      const remark = useIssue ? pick(rng2, REMARKS_ISSUE) : pick(rng2, REMARKS_OK);
+      const method    = pick(rng2, METHODS_WEIGHTED);
+      const useIssue  = rng2() < 0.08; // 8% chance minor issue
+      const remark    = useIssue ? pick(rng2, REMARKS_ISSUE) : pick(rng2, REMARKS_OK);
 
-      rackEntries.push({
+      return {
         date: dateStr,
         unit,
         rackId: rack,
-        area,
-        cleaningTime: time1,
+        area: '',            // area removed — kept as empty string for compatibility
+        cleaningTime: time,
         cleaningDone: true,
         method,
         checkedBy: staffName,
         remarks: remark,
         autoGenerated: true,
         slot: slot.label,
-      });
-
-      // Add a 2nd entry for this rack (additional spot-clean, few mins later)
-      if (rng2() < 0.65) {
-        const addMin = randInt(rng2, 8, 30);
-        const [hh, mm] = time1.split(':').map(Number);
-        const totalMins = hh * 60 + mm + addMin;
-        const time2 = `${pad(Math.floor(totalMins / 60) % 24)}:${pad(totalMins % 60)}`;
-        const method2 = pick(rng2, METHODS_WEIGHTED);
-        const remark2 = pick(rng2, REMARKS_OK);
-
-        rackEntries.push({
-          date: dateStr,
-          unit,
-          rackId: rack,
-          area: pick(rng2, areas),
-          cleaningTime: time2,
-          cleaningDone: true,
-          method: method2,
-          checkedBy: staffName,
-          remarks: remark2,
-          autoGenerated: true,
-          slot: slot.label,
-        });
-      }
+      };
     });
 
-    // Sort by time
+    // Sort by time ascending
     rackEntries.sort((a, b) => a.cleaningTime.localeCompare(b.cleaningTime));
     allEntries.push(...rackEntries);
   });
@@ -152,8 +141,8 @@ export function generateDayEntries(dateStr) {
 export function generateDateRange(fromStr, toStr) {
   const all = [];
   const from = new Date(fromStr + 'T00:00:00');
-  const to = new Date(toStr + 'T00:00:00');
-  const cur = new Date(from);
+  const to   = new Date(toStr   + 'T00:00:00');
+  const cur  = new Date(from);
   while (cur <= to) {
     const dateStr = `${cur.getFullYear()}-${pad(cur.getMonth() + 1)}-${pad(cur.getDate())}`;
     all.push(...generateDayEntries(dateStr));
@@ -168,4 +157,3 @@ export function todayStr() {
 }
 
 export { UNITS, UNIT_AREAS, STAFF, METHODS };
-
