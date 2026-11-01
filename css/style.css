@@ -140,18 +140,19 @@ body {
 
 /* Spice Image */
 .sidebar-spice {
-  height: 200px;
+  height: 190px;
   overflow: hidden;
   flex-shrink: 0;
-  border-top: 1px solid var(--border-soft);
   position: relative;
+  background: linear-gradient(to bottom, #FDF8F0 0%, #F5E8D0 100%);
 }
 .sidebar-spice img {
   width: 100%; height: 100%;
   object-fit: cover;
   object-position: bottom center;
   display: block;
-  opacity: 0.92;
+  opacity: 1;
+  mix-blend-mode: multiply; /* blends transparent PNG onto warm cream bg */
 }
 
 /* ════════════════════════════════════════════════════════════════

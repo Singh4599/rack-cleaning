@@ -78,15 +78,19 @@ window.addEventListener('online',  () => { isOnline = true;  updateCloudBadge();
 window.addEventListener('offline', () => { isOnline = false; updateCloudBadge(); });
 
 // ── CHECK TODAY — auto-generate entries for today if missing ──────────────────
+let _generatingToday = false; // guard against duplicate writes
 function checkAndGenerateToday() {
+  if (_generatingToday) return;
   const today = todayStr();
-  UNITS.forEach(unit => {
-    const hasTodayEntries = allRecords.some(r => r.date === today && (r.unit || 'Unit 11') === unit);
-    if (!hasTodayEntries) {
-      const entries = generateDayEntries(today).filter(e => e.unit === unit);
-      batchSaveRecords(entries).catch(console.error);
-    }
-  });
+  const missing = UNITS.filter(unit =>
+    !allRecords.some(r => r.date === today && (r.unit || 'Unit 11') === unit)
+  );
+  if (!missing.length) return;
+  _generatingToday = true;
+  Promise.all(missing.map(unit => {
+    const entries = generateDayEntries(today).filter(e => e.unit === unit);
+    return batchSaveRecords(entries);
+  })).catch(console.error).finally(() => { _generatingToday = false; });
 }
 
 // ── DATE CONTROLS ────────────────────────────────────────────────────────────
