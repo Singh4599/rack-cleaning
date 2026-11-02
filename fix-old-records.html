@@ -6,34 +6,41 @@
 <style>
   body { font-family: monospace; padding: 24px; background: #1a1a1a; color: #e5e5e5; }
   h2 { color: #f59e0b; }
+  p  { line-height: 1.7; margin-bottom: 8px; }
   #log { background: #0a0a0a; border: 1px solid #333; padding: 16px; border-radius: 8px;
-         max-height: 600px; overflow-y: auto; font-size: 13px; line-height: 1.8; }
+         max-height: 500px; overflow-y: auto; font-size: 13px; line-height: 1.8; margin-top: 16px; }
+  .btns { margin: 16px 0; display: flex; gap: 10px; flex-wrap: wrap; }
   button { background: #900C32; color: white; border: none; padding: 12px 28px;
-           border-radius: 8px; font-size: 15px; cursor: pointer; margin: 12px 4px; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
+           border-radius: 8px; font-size: 15px; cursor: pointer; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
   .ok   { color: #4ade80; }
   .warn { color: #fbbf24; }
   .err  { color: #f87171; }
   .info { color: #60a5fa; }
+  .dim  { color: #6b7280; }
+  #summary { margin-top: 14px; font-size: 14px; line-height: 2; }
 </style>
 </head>
 <body>
-<h2>🔧 Fix Old Rack Cleaning Records</h2>
-<p>This will update all existing Firestore records:<br>
-&nbsp;• Replace old staff names (Suresh Patel, Ramesh Kumar, etc.) with <strong>Pratap</strong> or <strong>Anil</strong><br>
-&nbsp;• Remove old bad remarks (e.g. "Sanitized with approved solution") and replace with clean ones<br>
-&nbsp;• Remove Area/Section field display (set to empty string)<br>
-<br>
-<strong>This does NOT delete any records — only updates them.</strong>
-</p>
-<button id="btn-run">▶ Run Fix</button>
-<button id="btn-stop" disabled>■ Stop</button>
+<h2>🔧 Fix All Old Rack Cleaning Records</h2>
+<p>This does THREE things in one pass:</p>
+<p>&nbsp;&nbsp;1️⃣ &nbsp;<b>Fix staff names</b> — any name that is NOT Pratap/Anil → replaced with Pratap or Anil</p>
+<p>&nbsp;&nbsp;2️⃣ &nbsp;<b>Fix remarks</b> — removes bad remarks ("Sanitized with approved solution" etc.) → clean replacement</p>
+<p>&nbsp;&nbsp;3️⃣ &nbsp;<b>Deduplicate</b> — for each day, keeps only 1 entry per rack (oldest kept, extras deleted)</p>
+<p style="color:#f87171">⚠️ Run this ONCE. Deleted duplicates cannot be recovered.</p>
+
+<div class="btns">
+  <button id="btn-run">▶ Run Full Fix</button>
+  <button id="btn-stop" disabled>■ Stop</button>
+</div>
+<div id="summary"></div>
 <div id="log"></div>
 
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getFirestore, collection, getDocs, writeBatch, doc, query, orderBy }
-  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import {
+  getFirestore, collection, getDocs, writeBatch, doc, deleteDoc, query, orderBy
+} from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCA3ge4JODmBVnPNU_UMX58X1iGIH62D-I",
@@ -48,20 +55,19 @@ const app = initializeApp(firebaseConfig);
 const db  = getFirestore(app);
 const COL = 'rackCleaningRecords';
 
-// Old staff names to replace
-const OLD_STAFF = ['Suresh Patel', 'Ramesh Kumar', 'Raj Kumar', 'Amit Sharma',
-                   'Priya Singh', 'Rohit Verma', 'Kavita Devi', 'Mohan Lal',
-                   'Deepak Kumar', 'Sunita Rani'];
+// ANY name that is NOT one of these two must be replaced
+const VALID_STAFF = ['pratap', 'anil'];
 
-// Old bad remarks to replace
-const OLD_REMARKS = [
-  'Sanitized with approved solution',
+// Bad remarks — case-insensitive contains match
+const BAD_REMARK_FRAGMENTS = [
   'sanitized with approved solution',
-  'Sanitized by approved solution',
-  'Sanitized with approved solutions',
+  'sanitized by approved',
+  'approved solution',
+  'all areas sanitized',
+  'all items checked and cleaned',
+  'all areas cleaned',
 ];
 
-// Valid replacement remarks
 const GOOD_REMARKS = [
   'OK – No issues found',
   'Cleaned thoroughly',
@@ -75,19 +81,16 @@ const GOOD_REMARKS = [
   'OK – Compliant',
 ];
 
-// Simple seeded pick for deterministic staff assignment per record
-function pick(arr, seed) {
-  return arr[Math.abs(Math.floor(seed)) % arr.length];
-}
-
 function hashStr(s) {
   let h = 0;
-  for (let i = 0; i < s.length; i++) { h = Math.imul(31, h) + s.charCodeAt(i) | 0; }
+  for (let i = 0; i < s.length; i++) h = Math.imul(31, h) + s.charCodeAt(i) | 0;
   return Math.abs(h);
 }
+function pick(arr, seed) { return arr[hashStr(String(seed)) % arr.length]; }
 
-const logEl = document.getElementById('log');
-let stopped = false;
+const logEl  = document.getElementById('log');
+const sumEl  = document.getElementById('summary');
+let stopped  = false;
 
 function log(msg, cls = '') {
   const line = document.createElement('div');
@@ -99,7 +102,7 @@ function log(msg, cls = '') {
 
 document.getElementById('btn-stop').addEventListener('click', () => {
   stopped = true;
-  log('⛔ Stopped by user.', 'warn');
+  log('⛔ Stopped.', 'warn');
 });
 
 document.getElementById('btn-run').addEventListener('click', async () => {
@@ -107,68 +110,125 @@ document.getElementById('btn-run').addEventListener('click', async () => {
   document.getElementById('btn-run').disabled = true;
   document.getElementById('btn-stop').disabled = false;
   logEl.innerHTML = '';
-  log('<b class="info">📡 Fetching all records from Firestore…</b>');
+  sumEl.innerHTML = '';
 
   try {
-    const q = query(collection(db, COL), orderBy('date', 'desc'));
-    const snap = await getDocs(q);
-    const docs = snap.docs;
-    log(`<span class="info">Found ${docs.length} total records.</span>`);
+    log('<b class="info">📡 Fetching all records…</b>');
+    const snap = await getDocs(query(collection(db, COL), orderBy('date', 'asc')));
+    const allDocs = snap.docs.map(d => ({ id: d.id, ...d.data(), _ref: d }));
+    log(`<span class="info">✓ Found ${allDocs.length} records total.</span>`);
 
-    let updated = 0, skipped = 0, errors = 0;
-    const BATCH_SIZE = 400;
+    // ── STEP 1 & 2: Fix names + remarks ────────────────────────────────────────
+    log('<br><b class="warn">── STEP 1/2: Fixing staff names & remarks ──</b>');
+    let nameFixed = 0, remarkFixed = 0, skipped = 0;
+    const CHUNK = 400;
 
-    for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+    for (let i = 0; i < allDocs.length; i += CHUNK) {
       if (stopped) break;
-      const chunk = docs.slice(i, i + BATCH_SIZE);
+      const chunk = allDocs.slice(i, i + CHUNK);
       const batch = writeBatch(db);
-      let batchHasChanges = false;
+      let hasChanges = false;
 
-      for (const docSnap of chunk) {
+      for (const rec of chunk) {
         if (stopped) break;
-        const data = docSnap.data();
         const changes = {};
 
-        // Fix checkedBy — replace old names
-        const cb = (data.checkedBy || '').trim();
-        if (OLD_STAFF.some(s => s.toLowerCase() === cb.toLowerCase())) {
-          // Deterministically assign Pratap or Anil based on doc ID
-          const newStaff = pick(['Pratap', 'Anil'], hashStr(docSnap.id));
-          changes.checkedBy = newStaff;
-          log(`  📝 ${docSnap.id} | ${data.date} ${data.rackId} | <span class="warn">"${cb}"</span> → <span class="ok">"${newStaff}"</span>`, '');
+        // Fix staff name
+        const cb = (rec.checkedBy || '').trim();
+        if (!VALID_STAFF.includes(cb.toLowerCase())) {
+          const newName = pick(['Pratap', 'Anil'], rec.id);
+          changes.checkedBy = newName;
+          log(`  📝 ${rec.date} ${rec.rackId} | <span class="warn">"${cb}"</span> → <span class="ok">"${newName}"</span>`);
+          nameFixed++;
         }
 
-        // Fix remarks — replace old bad remarks
-        const rem = (data.remarks || '').trim();
-        if (OLD_REMARKS.some(r => r.toLowerCase() === rem.toLowerCase())) {
-          const newRemark = pick(GOOD_REMARKS, hashStr(docSnap.id + 'r'));
-          changes.remarks = newRemark;
-          log(`  📝 ${docSnap.id} | ${data.date} ${data.rackId} | remarks: <span class="warn">"${rem}"</span> → <span class="ok">"${newRemark}"</span>`, '');
+        // Fix remarks
+        const rem = (rec.remarks || '').trim().toLowerCase();
+        if (BAD_REMARK_FRAGMENTS.some(f => rem.includes(f))) {
+          const newRem = pick(GOOD_REMARKS, rec.id + 'r');
+          changes.remarks = newRem;
+          log(`  📝 ${rec.date} ${rec.rackId} | remarks: <span class="warn">"${rec.remarks}"</span> → <span class="ok">"${newRem}"</span>`);
+          remarkFixed++;
         }
 
-        // Clear area field
-        if (data.area && data.area !== '') {
-          changes.area = '';
-        }
+        // Clear area
+        if (rec.area) changes.area = '';
 
         if (Object.keys(changes).length > 0) {
-          batch.update(doc(db, COL, docSnap.id), changes);
-          batchHasChanges = true;
-          updated++;
+          batch.update(doc(db, COL, rec.id), changes);
+          hasChanges = true;
+          // Update local copy so dedup step sees new values
+          Object.assign(rec, changes);
         } else {
           skipped++;
         }
       }
 
-      if (batchHasChanges && !stopped) {
+      if (hasChanges && !stopped) {
         await batch.commit();
-        log(`<span class="ok">✅ Committed batch (records ${i + 1}–${Math.min(i + BATCH_SIZE, docs.length)})</span>`);
+        log(`<span class="ok">  ✅ Committed batch ${Math.floor(i/CHUNK)+1}</span>`);
       }
     }
+    log(`<span class="ok">Step 1/2 done — names fixed: ${nameFixed}, remarks fixed: ${remarkFixed}, skipped: ${skipped}</span>`);
 
+    // ── STEP 3: Deduplicate — 1 entry per rack per day ─────────────────────────
     if (!stopped) {
-      log(`<br><b class="ok">🎉 Done! Updated: ${updated} | Skipped (no change): ${skipped} | Errors: ${errors}</b>`);
+      log('<br><b class="warn">── STEP 3: Deduplicating (1 entry per rack per day) ──</b>');
+      let deleted = 0;
+
+      // Group by date
+      const byDate = {};
+      for (const rec of allDocs) {
+        if (!byDate[rec.date]) byDate[rec.date] = [];
+        byDate[rec.date].push(rec);
+      }
+
+      const dates = Object.keys(byDate).sort();
+      log(`<span class="info">Scanning ${dates.length} unique dates…</span>`);
+
+      for (const date of dates) {
+        if (stopped) break;
+        const dayRecs = byDate[date];
+        // Group by rackId
+        const byRack = {};
+        for (const r of dayRecs) {
+          if (!byRack[r.rackId]) byRack[r.rackId] = [];
+          byRack[r.rackId].push(r);
+        }
+
+        const toDelete = [];
+        for (const [rack, recs] of Object.entries(byRack)) {
+          if (recs.length > 1) {
+            // Sort by createdAt ascending — keep oldest, delete rest
+            recs.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+            const extras = recs.slice(1); // everything after the first
+            toDelete.push(...extras);
+            log(`  🗑 ${date} ${rack} — keeping 1, deleting ${extras.length} duplicates`, 'warn');
+          }
+        }
+
+        if (toDelete.length > 0) {
+          // Delete in batches of 400
+          for (let i = 0; i < toDelete.length; i += 400) {
+            if (stopped) break;
+            const batch = writeBatch(db);
+            toDelete.slice(i, i + 400).forEach(r => batch.delete(doc(db, COL, r.id)));
+            await batch.commit();
+          }
+          deleted += toDelete.length;
+        }
+      }
+      log(`<span class="ok">Step 3 done — deleted ${deleted} duplicate records.</span>`);
     }
+
+    sumEl.innerHTML = `
+      <div class="ok">🎉 ALL DONE!</div>
+      <div>👤 Staff names fixed: <b>${nameFixed}</b></div>
+      <div>📝 Remarks fixed: <b>${remarkFixed}</b></div>
+      <div>🗑 Duplicates deleted: <b>(see log above)</b></div>
+      <div class="info">Refresh rack-cleaning.vercel.app to see clean data.</div>
+    `;
+
   } catch (e) {
     log(`<span class="err">❌ Error: ${e.message}</span>`);
     console.error(e);
@@ -180,4 +240,3 @@ document.getElementById('btn-run').addEventListener('click', async () => {
 </script>
 </body>
 </html>
-
