@@ -495,11 +495,7 @@ function printRackRecords(dates) {
   </tr></thead>
   <tbody>${rowsHtml}</tbody>
 </table>
-<div style="margin-top:10pt;font-size:8pt;display:flex;justify-content:space-between;border-top:1pt solid #ccc;padding-top:6pt">
-  <span><b>Prepared By:</b> _______________________</span>
-  <span><b>Checked By:</b> _______________________</span>
-  <span><b>Approved By:</b> _______________________</span>
-</div></div>`;
+</div>`;
   }).join('');
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
