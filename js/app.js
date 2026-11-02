@@ -1,9 +1,8 @@
 import { saveRecord, updateRecord, deleteRecord, batchSaveRecords, subscribeRecords } from './firebase-config.js';
-import { generateDayEntries, generateDateRange, todayStr, UNITS, STAFF } from './auto-generate.js';
+import { generateDayEntries, generateDateRange, todayStr, STAFF } from './auto-generate.js';
 
 // ── STATE ──────────────────────────────────────────────────────────────────────
 let allRecords  = [];
-let activeUnit  = localStorage.getItem('rc_active_unit') || 'Unit 11';
 let activeDate  = todayStr();   // single-day filter (default = today)
 let searchQuery = '';
 let editingId   = null;
@@ -78,25 +77,22 @@ window.addEventListener('online',  () => { isOnline = true;  updateCloudBadge();
 window.addEventListener('offline', () => { isOnline = false; updateCloudBadge(); });
 
 // ── CHECK TODAY — auto-generate entries if missing ────────────────────────────
-// Session-level set — once a unit's today-entries are confirmed/generated, skip forever
-const _unitTodayConfirmed = new Set();
+let _todayConfirmed = false;
 
 function checkAndGenerateToday() {
+  if (_todayConfirmed) return;
   const today = todayStr();
-  UNITS.forEach(unit => {
-    if (_unitTodayConfirmed.has(unit)) return; // already handled this session
-    const hasEntries = allRecords.some(r => r.date === today && (r.unit || 'Unit 11') === unit);
-    if (hasEntries) {
-      _unitTodayConfirmed.add(unit); // already exists → mark confirmed, never generate again
-    } else {
-      _unitTodayConfirmed.add(unit); // mark first so concurrent snapshots don't double-generate
-      const entries = generateDayEntries(today).filter(e => e.unit === unit);
-      batchSaveRecords(entries).catch(err => {
-        _unitTodayConfirmed.delete(unit); // allow retry only on actual error
-        console.error(err);
-      });
-    }
-  });
+  const hasEntries = allRecords.some(r => r.date === today);
+  if (hasEntries) {
+    _todayConfirmed = true;
+  } else {
+    _todayConfirmed = true;
+    const entries = generateDayEntries(today);
+    batchSaveRecords(entries).catch(err => {
+      _todayConfirmed = false;
+      console.error(err);
+    });
+  }
 }
 
 // ── DEDUP — remove duplicate Firestore records for a given date ────────────────
@@ -108,8 +104,8 @@ async function deduplicateDate(dateStr) {
   [...dayRecs]
     .sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0))
     .forEach(r => {
-      // Key: unit + rack + time + area (enough to identify a unique cleaning event)
-      const key = `${r.unit || 'Unit 11'}|${r.rackId}|${r.cleaningTime}|${r.area}`;
+      // Key: rack + time (unique per cleaning event)
+      const key = `${r.rackId}|${r.cleaningTime}`;
       if (seen.has(key)) {
         toDelete.push(r.id);
       } else {
@@ -167,15 +163,6 @@ window.goToNextDay = function() {
   renderAll();
 };
 
-// ── UNIT CONTROL ─────────────────────────────────────────────────────────────
-window.setActiveUnit = function(unit) {
-  activeUnit = unit;
-  localStorage.setItem('rc_active_unit', unit);
-  document.getElementById('unit-btn-11')?.classList.toggle('active', unit === 'Unit 11');
-  document.getElementById('unit-btn-12')?.classList.toggle('active', unit === 'Unit 12');
-  renderAll();
-};
-
 // ── RENDER ALL ────────────────────────────────────────────────────────────────
 function renderAll() {
   renderStatCards();
@@ -185,18 +172,16 @@ function renderAll() {
 }
 
 function renderNavBadge() {
-  const unitRecs = allRecords.filter(r => (r.unit || 'Unit 11') === activeUnit);
   const el = document.getElementById('nav-count');
-  if (el) el.textContent = unitRecs.length;
+  if (el) el.textContent = allRecords.length;
 }
 
 // ── STAT CARDS ────────────────────────────────────────────────────────────────
 function renderStatCards() {
-  const unitRecs = allRecords.filter(r => (r.unit || 'Unit 11') === activeUnit);
-  const todayRecs = unitRecs.filter(r => r.date === todayStr());
+  const todayRecs = allRecords.filter(r => r.date === todayStr());
   const racks = new Set(todayRecs.map(r => r.rackId)).size;
 
-  document.getElementById('stat-total').textContent   = unitRecs.length;
+  document.getElementById('stat-total').textContent   = allRecords.length;
   document.getElementById('stat-racks').textContent   = racks;
   document.getElementById('stat-pending').textContent = 0; // all auto-generated = done
 
@@ -231,9 +216,7 @@ function renderDateHeading() {
 
 // ── TABLE ─────────────────────────────────────────────────────────────────────
 function renderTable() {
-  let recs = allRecords.filter(r =>
-    (r.unit || 'Unit 11') === activeUnit && r.date === activeDate
-  );
+  let recs = allRecords.filter(r => r.date === activeDate);
 
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
@@ -302,7 +285,6 @@ function openModal(id) {
 
   const form = document.getElementById('modal-form');
   form['m-date'].value      = rec?.date         || activeDate;
-  form['m-unit'].value      = rec?.unit         || activeUnit;
   form['m-rackId'].value    = rec?.rackId       || 'Rack 1';
   form['m-time'].value      = rec?.cleaningTime || '';
   form['m-done'].checked    = rec?.cleaningDone !== false;
@@ -315,10 +297,8 @@ function openModal(id) {
 }
 
 function updateModalStaff() {
-  const unit  = document.getElementById('m-unit').value;
-  const staff = STAFF[unit] || [];
   document.getElementById('dl-staff').innerHTML =
-    staff.map(s => `<option value="${s}">`).join('');
+    STAFF.map(s => `<option value="${s}">`).join('');
 }
 
 function closeModal() {
@@ -330,7 +310,6 @@ async function saveModal() {
   const form = document.getElementById('modal-form');
   const data = {
     date:          form['m-date'].value,
-    unit:          form['m-unit'].value,
     rackId:        form['m-rackId'].value,
     cleaningTime:  form['m-time'].value,
     cleaningDone:  form['m-done'].checked,
@@ -339,7 +318,7 @@ async function saveModal() {
     remarks:       form['m-remarks'].value.trim(),
     autoGenerated: false,
   };
-  if (!data.date || !data.rackId || !data.unit) {
+  if (!data.date || !data.rackId) {
     showToast('Fill required fields.', 'error'); return;
   }
   const btn = document.getElementById('modal-save');
@@ -348,14 +327,8 @@ async function saveModal() {
     if (editingId) { await updateRecord(editingId, data); showToast('Updated ✓'); }
     else           { await saveRecord(data);              showToast('Saved ✓'); }
     closeModal();
-    // Switch unit + date to match saved record
-    activeUnit = data.unit;
+    // Switch date to match saved record
     activeDate = data.date;
-    localStorage.setItem('rc_active_unit', activeUnit);
-    // Sync unit buttons
-    document.getElementById('unit-btn-11')?.classList.toggle('active', activeUnit === 'Unit 11');
-    document.getElementById('unit-btn-12')?.classList.toggle('active', activeUnit === 'Unit 12');
-    // Sync date controls
     syncDateUI();
   } catch (e) {
     console.error(e);
@@ -376,14 +349,13 @@ window.confirmDelete = function(id) {
 
 // ── EXPORT ────────────────────────────────────────────────────────────────────
 function exportCSV() {
-  // Export all records for selected unit (all time)
+  // Export all records (all time)
   const recs = allRecords
-    .filter(r => (r.unit || 'Unit 11') === activeUnit)
     .sort((a,b) => a.date.localeCompare(b.date) || (a.cleaningTime||'').localeCompare(b.cleaningTime||''));
 
-  const header = ['#','Date','Unit','Rack','Time','Done','Method','Checked By','Remarks'];
+  const header = ['#','Date','Rack','Time','Done','Method','Checked By','Remarks'];
   const rows   = recs.map((r, i) => [
-    i+1, fmtDate(r.date), r.unit, r.rackId,
+    i+1, fmtDate(r.date), r.rackId,
     r.cleaningTime, r.cleaningDone ? 'Yes' : 'No',
     r.method, r.checkedBy, r.remarks
   ].map(v => `"${String(v||'').replace(/"/g,'""')}"`));
@@ -392,7 +364,7 @@ function exportCSV() {
   const blob = new Blob([csv], { type: 'text/csv' });
   const a    = Object.assign(document.createElement('a'), {
     href:     URL.createObjectURL(blob),
-    download: `RackCleaning_${activeUnit.replace(' ','')}_${todayStr()}.csv`
+    download: `RackCleaning_${todayStr()}.csv`
   });
   a.click();
   URL.revokeObjectURL(a.href);
@@ -417,7 +389,7 @@ function updatePrintInfo() {
   const today = todayStr();
   if (_printTab === 'day') {
     const d = document.getElementById('pm-single-date')?.value || today;
-    const recs = allRecords.filter(r => (r.unit||'Unit 11') === activeUnit && r.date === d);
+    const recs = allRecords.filter(r => r.date === d);
     info.textContent = `📋 ${recs.length} record${recs.length !== 1 ? 's' : ''} on ${fmtDate(d) || 'selected date'}`;
   } else {
     const from = document.getElementById('pm-from-date')?.value;
@@ -425,7 +397,7 @@ function updatePrintInfo() {
     if (!from || !to) { info.textContent = 'Select from and to dates'; return; }
     if (from > to)    { info.textContent = '⚠️ From must be before To date'; return; }
     const days = Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
-    const recs = allRecords.filter(r => (r.unit||'Unit 11') === activeUnit && r.date >= from && r.date <= to);
+    const recs = allRecords.filter(r => r.date >= from && r.date <= to);
     info.textContent = `📅 ${days} day${days !== 1 ? 's' : ''} • ${recs.length} records total`;
   }
 }
@@ -477,7 +449,7 @@ function printRackRecords(dates) {
   const rackColor = { 'Rack 1':'#1D4ED8','Rack 2':'#15803D','Rack 3':'#C2410C' };
 
   const pagesHtml = dates.map((ds, pi) => {
-    const recs = allRecords.filter(r => (r.unit||'Unit 11') === activeUnit && r.date === ds)
+    const recs = allRecords.filter(r => r.date === ds)
                            .sort((a,b) => (a.cleaningTime||'').localeCompare(b.cleaningTime||''));
     const [y,m,d] = ds.split('-');
     const dateStr = `${d}/${m}/${y}`;
@@ -501,12 +473,11 @@ function printRackRecords(dates) {
 <div style="border:2pt solid #000;padding:6pt 10pt;margin-bottom:6pt">
   <div style="display:flex;justify-content:space-between;align-items:flex-start">
     <div>
-      <h1 style="font-size:13pt;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rack Cleaning Record \u2014 365 Spicery</h1>
-      <p style="font-size:7.5pt;color:#444;margin-top:2pt">FSSAI Compliance Log \u2022 Daily Rack Sanitation \u2022 ${esc(activeUnit)}</p>
+      <h1 style="font-size:13pt;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rack Cleaning Record — 365 Spicery</h1>
+      <p style="font-size:7.5pt;color:#444;margin-top:2pt">FSSAI Compliance Log • Daily Rack Sanitation</p>
     </div>
     <div style="text-align:right;font-size:7.5pt;color:#444;line-height:1.6">
       <div><b>Date:</b> ${dateStr} &nbsp; <b>Day:</b> ${dayName}</div>
-      <div><b>Unit:</b> ${esc(activeUnit)}</div>
     </div>
   </div>
   <div style="display:flex;gap:8pt;margin-top:5pt">
@@ -532,7 +503,7 @@ function printRackRecords(dates) {
   }).join('');
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
-<title>Rack Cleaning Record \u2014 ${activeUnit}</title>
+<title>Rack Cleaning Record — 365 Spicery</title>
 <style>
   @page{size:A4 landscape;margin:8mm}
   *{margin:0;padding:0;box-sizing:border-box}
@@ -568,12 +539,6 @@ function init() {
   updateCloudBadge();
   showLoader(true);
 
-  // Restore unit from storage
-  const storedUnit = localStorage.getItem('rc_active_unit') || 'Unit 11';
-  activeUnit = storedUnit;
-  document.getElementById('unit-btn-11')?.classList.toggle('active', activeUnit === 'Unit 11');
-  document.getElementById('unit-btn-12')?.classList.toggle('active', activeUnit === 'Unit 12');
-
   // Default date = today
   activeDate = todayStr();
   syncDateUI();
@@ -606,10 +571,6 @@ function init() {
       catch(_) { dp.focus(); dp.click(); }
     });
   }
-
-  // Unit buttons
-  document.getElementById('unit-btn-11')?.addEventListener('click', () => window.setActiveUnit('Unit 11'));
-  document.getElementById('unit-btn-12')?.addEventListener('click', () => window.setActiveUnit('Unit 12'));
 
   // Search
   document.getElementById('search-input')?.addEventListener('input', e => {

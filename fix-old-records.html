@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fix Old Records — Rack Cleaning</title>
+<style>
+  body { font-family: monospace; padding: 24px; background: #1a1a1a; color: #e5e5e5; }
+  h2 { color: #f59e0b; }
+  #log { background: #0a0a0a; border: 1px solid #333; padding: 16px; border-radius: 8px;
+         max-height: 600px; overflow-y: auto; font-size: 13px; line-height: 1.8; }
+  button { background: #900C32; color: white; border: none; padding: 12px 28px;
+           border-radius: 8px; font-size: 15px; cursor: pointer; margin: 12px 4px; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .ok   { color: #4ade80; }
+  .warn { color: #fbbf24; }
+  .err  { color: #f87171; }
+  .info { color: #60a5fa; }
+</style>
+</head>
+<body>
+<h2>🔧 Fix Old Rack Cleaning Records</h2>
+<p>This will update all existing Firestore records:<br>
+&nbsp;• Replace old staff names (Suresh Patel, Ramesh Kumar, etc.) with <strong>Pratap</strong> or <strong>Anil</strong><br>
+&nbsp;• Remove old bad remarks (e.g. "Sanitized with approved solution") and replace with clean ones<br>
+&nbsp;• Remove Area/Section field display (set to empty string)<br>
+<br>
+<strong>This does NOT delete any records — only updates them.</strong>
+</p>
+<button id="btn-run">▶ Run Fix</button>
+<button id="btn-stop" disabled>■ Stop</button>
+<div id="log"></div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getFirestore, collection, getDocs, writeBatch, doc, query, orderBy }
+  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCA3ge4JODmBVnPNU_UMX58X1iGIH62D-I",
+  authDomain: "rack-af013.firebaseapp.com",
+  projectId: "rack-af013",
+  storageBucket: "rack-af013.firebasestorage.app",
+  messagingSenderId: "780843931281",
+  appId: "1:780843931281:web:98bae08c646521af329130"
+};
+
+const app = initializeApp(firebaseConfig);
+const db  = getFirestore(app);
+const COL = 'rackCleaningRecords';
+
+// Old staff names to replace
+const OLD_STAFF = ['Suresh Patel', 'Ramesh Kumar', 'Raj Kumar', 'Amit Sharma',
+                   'Priya Singh', 'Rohit Verma', 'Kavita Devi', 'Mohan Lal',
+                   'Deepak Kumar', 'Sunita Rani'];
+
+// Old bad remarks to replace
+const OLD_REMARKS = [
+  'Sanitized with approved solution',
+  'sanitized with approved solution',
+  'Sanitized by approved solution',
+  'Sanitized with approved solutions',
+];
+
+// Valid replacement remarks
+const GOOD_REMARKS = [
+  'OK – No issues found',
+  'Cleaned thoroughly',
+  'Minor dust removed',
+  'Routine clean done',
+  'OK – Regular cleaning',
+  'Rack cleared and wiped',
+  'OK – Checked & cleaned',
+  'Clean – no spillage',
+  'Surface wiped, no issues',
+  'OK – Compliant',
+];
+
+// Simple seeded pick for deterministic staff assignment per record
+function pick(arr, seed) {
+  return arr[Math.abs(Math.floor(seed)) % arr.length];
+}
+
+function hashStr(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) { h = Math.imul(31, h) + s.charCodeAt(i) | 0; }
+  return Math.abs(h);
+}
+
+const logEl = document.getElementById('log');
+let stopped = false;
+
+function log(msg, cls = '') {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.innerHTML = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+document.getElementById('btn-stop').addEventListener('click', () => {
+  stopped = true;
+  log('⛔ Stopped by user.', 'warn');
+});
+
+document.getElementById('btn-run').addEventListener('click', async () => {
+  stopped = false;
+  document.getElementById('btn-run').disabled = true;
+  document.getElementById('btn-stop').disabled = false;
+  logEl.innerHTML = '';
+  log('<b class="info">📡 Fetching all records from Firestore…</b>');
+
+  try {
+    const q = query(collection(db, COL), orderBy('date', 'desc'));
+    const snap = await getDocs(q);
+    const docs = snap.docs;
+    log(`<span class="info">Found ${docs.length} total records.</span>`);
+
+    let updated = 0, skipped = 0, errors = 0;
+    const BATCH_SIZE = 400;
+
+    for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+      if (stopped) break;
+      const chunk = docs.slice(i, i + BATCH_SIZE);
+      const batch = writeBatch(db);
+      let batchHasChanges = false;
+
+      for (const docSnap of chunk) {
+        if (stopped) break;
+        const data = docSnap.data();
+        const changes = {};
+
+        // Fix checkedBy — replace old names
+        const cb = (data.checkedBy || '').trim();
+        if (OLD_STAFF.some(s => s.toLowerCase() === cb.toLowerCase())) {
+          // Deterministically assign Pratap or Anil based on doc ID
+          const newStaff = pick(['Pratap', 'Anil'], hashStr(docSnap.id));
+          changes.checkedBy = newStaff;
+          log(`  📝 ${docSnap.id} | ${data.date} ${data.rackId} | <span class="warn">"${cb}"</span> → <span class="ok">"${newStaff}"</span>`, '');
+        }
+
+        // Fix remarks — replace old bad remarks
+        const rem = (data.remarks || '').trim();
+        if (OLD_REMARKS.some(r => r.toLowerCase() === rem.toLowerCase())) {
+          const newRemark = pick(GOOD_REMARKS, hashStr(docSnap.id + 'r'));
+          changes.remarks = newRemark;
+          log(`  📝 ${docSnap.id} | ${data.date} ${data.rackId} | remarks: <span class="warn">"${rem}"</span> → <span class="ok">"${newRemark}"</span>`, '');
+        }
+
+        // Clear area field
+        if (data.area && data.area !== '') {
+          changes.area = '';
+        }
+
+        if (Object.keys(changes).length > 0) {
+          batch.update(doc(db, COL, docSnap.id), changes);
+          batchHasChanges = true;
+          updated++;
+        } else {
+          skipped++;
+        }
+      }
+
+      if (batchHasChanges && !stopped) {
+        await batch.commit();
+        log(`<span class="ok">✅ Committed batch (records ${i + 1}–${Math.min(i + BATCH_SIZE, docs.length)})</span>`);
+      }
+    }
+
+    if (!stopped) {
+      log(`<br><b class="ok">🎉 Done! Updated: ${updated} | Skipped (no change): ${skipped} | Errors: ${errors}</b>`);
+    }
+  } catch (e) {
+    log(`<span class="err">❌ Error: ${e.message}</span>`);
+    console.error(e);
+  } finally {
+    document.getElementById('btn-run').disabled = false;
+    document.getElementById('btn-stop').disabled = true;
+  }
+});
+</script>
+</body>
+</html>
