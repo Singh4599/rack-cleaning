@@ -19,6 +19,7 @@
 <p>Fills <b>Unit 11 &amp; Unit 12</b> data from <b>April 1, 2026</b> to <b>today</b> (Mon–Sat only).<br>
 Only missing rack+date+unit combos are added. Existing records are NOT touched.</p>
 <button id="btn" onclick="runBackfill()">▶ Start Backfill</button>
+<button id="btn-del-sun" onclick="deleteSundayRecords()" style="background:#e65c00">🗑 Delete All Sunday Records</button>
 <button onclick="location.href='index.html'" style="background:#555">← Back to App</button>
 <div id="status">Ready.</div>
 <div id="log"></div>
@@ -155,6 +156,41 @@ function log(msg) {
 }
 function status(msg) { document.getElementById('status').textContent = msg; }
 
+window.deleteSundayRecords = async function() {
+  if (!confirm('Delete ALL Sunday records from Firestore? This cannot be undone.')) return;
+  const btn = document.getElementById('btn-del-sun');
+  btn.disabled = true;
+  document.getElementById('log').textContent = '';
+  status('Loading all records...');
+  try {
+    const snap = await getDocs(query(collection(db, COL), orderBy('date', 'asc')));
+    const sundayIds = [];
+    snap.docs.forEach(d => {
+      const r = d.data();
+      if (r.date && new Date(r.date + 'T00:00:00').getDay() === 0) sundayIds.push(d.id);
+    });
+    log(`Found ${sundayIds.length} Sunday records to delete.`);
+    if (sundayIds.length === 0) { status('No Sunday records found!'); btn.disabled = false; return; }
+    const BATCH_SIZE = 400;
+    let done = 0;
+    for (let i = 0; i < sundayIds.length; i += BATCH_SIZE) {
+      const chunk = sundayIds.slice(i, i + BATCH_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach(id => batch.delete(doc(db, COL, id)));
+      await batch.commit();
+      done += chunk.length;
+      log(`  ✔ Deleted ${done} / ${sundayIds.length}...`);
+      status(`Deleting Sunday records... ${done} / ${sundayIds.length}`);
+    }
+    log(`\n🎉 Done! ${sundayIds.length} Sunday records deleted.`);
+    status(`✅ All Sunday records deleted! Refresh the app.`);
+  } catch (err) {
+    log('❌ ERROR: ' + err.message);
+    status('Error! See log.');
+    btn.disabled = false;
+  }
+};
+
 window.runBackfill = async function() {
   const btn = document.getElementById('btn');
   btn.disabled = true;
@@ -223,3 +259,4 @@ window.runBackfill = async function() {
 </script>
 </body>
 </html>
+
