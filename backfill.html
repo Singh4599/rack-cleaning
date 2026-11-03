@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Backfill Rack Records</title>
+<style>
+  body { font-family: monospace; padding: 24px; background: #f5f5f5; }
+  h2   { margin-bottom: 8px; }
+  #log { background: #fff; border: 1px solid #ccc; padding: 16px; height: 400px; overflow-y: auto;
+         white-space: pre-wrap; font-size: 13px; margin-top: 12px; border-radius: 6px; }
+  button { padding: 10px 24px; font-size: 15px; cursor: pointer; margin-right: 10px;
+           border: none; border-radius: 6px; background: #c00; color: #fff; }
+  button:disabled { background: #aaa; cursor: default; }
+  #status { font-size: 16px; font-weight: bold; margin-top: 12px; color: #333; }
+</style>
+</head>
+<body>
+<h2>🧹 Rack Cleaning — Backfill Script</h2>
+<p>Fills <b>Unit 11 &amp; Unit 12</b> data from <b>April 1, 2026</b> to <b>today</b> (Mon–Sat only).<br>
+Only missing rack+date+unit combos are added. Existing records are NOT touched.</p>
+<button id="btn" onclick="runBackfill()">▶ Start Backfill</button>
+<button onclick="location.href='index.html'" style="background:#555">← Back to App</button>
+<div id="status">Ready.</div>
+<div id="log"></div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import {
+  getFirestore, collection, getDocs, addDoc, query, orderBy, writeBatch, doc, serverTimestamp
+} from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCA3ge4JODmBVnPNU_UMX58X1iGIH62D-I",
+  authDomain: "rack-af013.firebaseapp.com",
+  projectId: "rack-af013",
+  storageBucket: "rack-af013.firebasestorage.app",
+  messagingSenderId: "780843931281",
+  appId: "1:780843931281:web:98bae08c646521af329130"
+};
+
+const app  = initializeApp(firebaseConfig);
+const db   = getFirestore(app);
+const COL  = 'rackCleaningRecords';
+
+// ── Seeded RNG (same as auto-generate.js) ──────────────────────────────────────
+function seeded(seed) {
+  let t = (seed ^ 0x6D2B79F5) >>> 0;
+  return function() {
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function pick(rng, arr) { return arr[Math.floor(rng() * arr.length)]; }
+function randInt(rng, min, max) { return Math.floor(rng() * (max - min + 1)) + min; }
+function pad(n) { return String(n).padStart(2, '0'); }
+function roundToFive(m) { return Math.round(m / 5) * 5; }
+function shuffle(rng, arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function pickTimeInSlot(rng, slot) {
+  const h = randInt(rng, slot.hMin, slot.hMax);
+  const mMax = (h === slot.hMax && slot.mMaxLast !== undefined) ? slot.mMaxLast : 59;
+  const mMin = (h === slot.hMin && slot.mMinFirst !== undefined) ? slot.mMinFirst : 0;
+  const rawMin = randInt(rng, mMin, mMax);
+  let rounded = roundToFive(rawMin);
+  if (h === slot.hMax && rounded > mMax) rounded = mMax - (mMax % 5);
+  if (h === slot.hMin && rounded < mMin) rounded = mMin + (5 - mMin % 5) % 5;
+  return `${pad(h)}:${pad(Math.min(rounded, 59))}`;
+}
+
+const STAFF  = ['Pratap', 'Anil'];
+const METHODS = ['Dry Wipe', 'Dry Wipe', 'Wet Wipe', 'Wet Wipe', 'Sweep & Wipe', 'Sanitize & Wipe', 'Vacuum & Wipe'];
+const REMARKS_OK = [
+  'OK – No issues found', 'Cleaned thoroughly', 'Minor dust removed',
+  'Routine clean done', 'OK – Regular cleaning', 'Rack cleared and wiped',
+  'OK – Checked & cleaned', 'Clean – no spillage', 'Surface wiped, no issues', 'OK – Compliant',
+];
+const REMARKS_ISSUE = [
+  'Minor spill found and cleaned', 'Dust accumulation – cleared',
+  'Old stock residue removed', 'Light staining found – cleaned', 'Spillage near base – cleaned',
+];
+const TIME_SLOTS = [
+  { label: 'Morning', hMin: 9,  hMax: 10, mMinFirst: 0,  mMaxLast: 0  },
+  { label: 'Midday',  hMin: 12, hMax: 13, mMinFirst: 30, mMaxLast: 0  },
+  { label: 'Evening', hMin: 17, hMax: 18, mMinFirst: 30, mMaxLast: 0  },
+];
+const RACKS = ['Rack 1', 'Rack 2', 'Rack 3'];
+const UNITS = ['Unit 11', 'Unit 12'];
+
+function generateForRack(dateStr, unit, rack, rackIdx) {
+  const unitSeed  = unit === 'Unit 12' ? 99991 : 0;
+  const dateEpoch = new Date(dateStr + 'T00:00:00').getTime() / 1000;
+
+  // Base slot for this rack (same logic as auto-generate.js)
+  const rng0      = seeded(dateEpoch + unitSeed);
+  const slotOrder = shuffle(rng0, [0, 1, 2]);
+  const slot      = TIME_SLOTS[slotOrder[rackIdx]];
+  const rng2      = seeded(dateEpoch + unitSeed + rackIdx * 31337 + 1);
+  const time      = pickTimeInSlot(rng2, slot);
+  const staffName = pick(rng2, STAFF);
+  const method    = pick(rng2, METHODS);
+  const useIssue  = rng2() < 0.08;
+  const remark    = useIssue ? pick(rng2, REMARKS_ISSUE) : pick(rng2, REMARKS_OK);
+
+  const entries = [{
+    date: dateStr, rackId: rack, unit, area: '',
+    cleaningTime: time, cleaningDone: true, method,
+    checkedBy: staffName, remarks: remark, autoGenerated: true, slot: slot.label,
+  }];
+
+  // 40% chance of 2nd entry
+  const rngBonus = seeded(dateEpoch + unitSeed + rackIdx * 55555 + 8888);
+  if (rngBonus() < 0.40) {
+    const otherSlots = [0, 1, 2].filter(s => s !== slotOrder[rackIdx]);
+    const bonusSlotIdx = otherSlots[Math.floor(rngBonus() * otherSlots.length)];
+    const slot2  = TIME_SLOTS[bonusSlotIdx];
+    const rng4   = seeded(dateEpoch + unitSeed + rackIdx * 55555 + 1111);
+    const time2  = pickTimeInSlot(rng4, slot2);
+    const staff2 = pick(rng4, STAFF);
+    const meth2  = pick(rng4, METHODS);
+    const rem2   = pick(rng4, REMARKS_OK);
+    entries.push({
+      date: dateStr, rackId: rack, unit, area: '',
+      cleaningTime: time2, cleaningDone: true, method: meth2,
+      checkedBy: staff2, remarks: rem2, autoGenerated: true, slot: slot2.label,
+    });
+  }
+  return entries;
+}
+
+function dateRange(fromStr, toStr) {
+  const dates = [];
+  const cur = new Date(fromStr + 'T00:00:00');
+  const end = new Date(toStr   + 'T00:00:00');
+  while (cur <= end) {
+    if (cur.getDay() !== 0) { // skip Sunday
+      const y = cur.getFullYear(), m = pad(cur.getMonth() + 1), d2 = pad(cur.getDate());
+      dates.push(`${y}-${m}-${d2}`);
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+}
+
+function log(msg) {
+  const el = document.getElementById('log');
+  el.textContent += msg + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+function status(msg) { document.getElementById('status').textContent = msg; }
+
+window.runBackfill = async function() {
+  const btn = document.getElementById('btn');
+  btn.disabled = true;
+  document.getElementById('log').textContent = '';
+  status('Loading existing records from Firestore...');
+
+  try {
+    // 1. Fetch all existing records
+    const snap = await getDocs(query(collection(db, COL), orderBy('date', 'asc')));
+    const existing = new Set();
+    snap.docs.forEach(d => {
+      const r = d.data();
+      const unit = r.unit || 'Unit 11';
+      // Key: unit|rack|date (we allow multiple times per rack per day — just check at least 1)
+      existing.add(`${unit}|${r.rackId}|${r.date}`);
+    });
+    log(`✅ Loaded ${snap.size} existing records.`);
+
+    // 2. Build date range: April 1, 2026 → today
+    const today = (() => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; })();
+    const dates  = dateRange('2026-04-01', today);
+    log(`📅 Date range: 2026-04-01 → ${today} = ${dates.length} working days`);
+
+    // 3. Find missing rack+date+unit combos and generate entries
+    const toInsert = [];
+    for (const ds of dates) {
+      for (const unit of UNITS) {
+        for (let ri = 0; ri < RACKS.length; ri++) {
+          const rack = RACKS[ri];
+          const key  = `${unit}|${rack}|${ds}`;
+          if (!existing.has(key)) {
+            const entries = generateForRack(ds, unit, rack, ri);
+            toInsert.push(...entries);
+          }
+        }
+      }
+    }
+
+    log(`\n📝 Need to insert: ${toInsert.length} new entries`);
+    if (toInsert.length === 0) { status('✅ All data already complete!'); btn.disabled = false; return; }
+
+    // 4. Batch insert (Firestore allows 500 per batch)
+    const BATCH_SIZE = 400;
+    let done = 0;
+    for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+      const chunk = toInsert.slice(i, i + BATCH_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach(entry => {
+        const ref = doc(collection(db, COL));
+        batch.set(ref, { ...entry, createdAt: serverTimestamp() });
+      });
+      await batch.commit();
+      done += chunk.length;
+      log(`  ✔ Inserted ${done} / ${toInsert.length}...`);
+      status(`Inserting... ${done} / ${toInsert.length}`);
+    }
+
+    log(`\n🎉 Done! ${toInsert.length} records inserted.`);
+    status(`✅ Backfill complete! ${toInsert.length} records added. Go back to app and refresh.`);
+  } catch (err) {
+    log('❌ ERROR: ' + err.message);
+    status('Error! See log.');
+    btn.disabled = false;
+  }
+};
+</script>
+</body>
+</html>
