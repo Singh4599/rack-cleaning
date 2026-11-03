@@ -478,7 +478,7 @@ function printRackRecords(dates) {
     const totalRecs = allRows.length;
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
-<title>Rack Cleaning Record — 365 Spicery</title>
+<title>Rack Cleaning Record — LV Spices</title>
 <style>
   @page{size:A4 landscape;margin:8mm}
   *{margin:0;padding:0;box-sizing:border-box}
@@ -492,7 +492,7 @@ function printRackRecords(dates) {
 <div style="border:2pt solid #000;padding:5pt 10pt;margin-bottom:5pt">
   <div style="display:flex;justify-content:space-between;align-items:flex-start">
     <div>
-      <h1 style="font-size:12pt;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rack Cleaning Record — 365 Spicery</h1>
+      <h1 style="font-size:12pt;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rack Cleaning Record — LV Spices</h1>
       <p style="font-size:7pt;color:#444;margin-top:2pt">FSSAI Compliance Log • Daily Rack Sanitation</p>
     </div>
     <div style="text-align:right;font-size:7.5pt;color:#444;line-height:1.6">
@@ -544,7 +544,7 @@ function printRackRecords(dates) {
 <div style="border:2pt solid #000;padding:6pt 10pt;margin-bottom:6pt">
   <div style="display:flex;justify-content:space-between;align-items:flex-start">
     <div>
-      <h1 style="font-size:13pt;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rack Cleaning Record — 365 Spicery</h1>
+      <h1 style="font-size:13pt;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rack Cleaning Record — LV Spices</h1>
       <p style="font-size:7.5pt;color:#444;margin-top:2pt">FSSAI Compliance Log • Daily Rack Sanitation</p>
     </div>
     <div style="text-align:right;font-size:7.5pt;color:#444;line-height:1.6">
@@ -570,7 +570,7 @@ function printRackRecords(dates) {
   }).join('');
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
-<title>Rack Cleaning Record — 365 Spicery</title>
+<title>Rack Cleaning Record — LV Spices</title>
 <style>
   @page{size:A4 landscape;margin:8mm}
   *{margin:0;padding:0;box-sizing:border-box}
