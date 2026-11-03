@@ -444,10 +444,83 @@ function executePrint() {
 }
 
 function printRackRecords(dates) {
-  function esc(v) { return v ? String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '\u2014'; }
+  function esc(v) { return v ? String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '—'; }
   const rackBg    = { 'Rack 1':'#DBEAFE','Rack 2':'#DCFCE7','Rack 3':'#FFEDD5' };
   const rackColor = { 'Rack 1':'#1D4ED8','Rack 2':'#15803D','Rack 3':'#C2410C' };
 
+  const isRange = dates.length > 1;
+
+  if (isRange) {
+    // ── RANGE MODE: all records in ONE continuous table, compact rows ──
+    const allRows = [];
+    dates.forEach(ds => {
+      const recs = allRecords.filter(r => r.date === ds)
+                             .sort((a,b) => (a.cleaningTime||'').localeCompare(b.cleaningTime||''));
+      const [y,m,d] = ds.split('-');
+      const dateStr = `${d}/${m}/${y}`;
+      recs.forEach((r,i) => {
+        allRows.push(`<tr>
+          <td style="text-align:center;color:#6b7280;font-weight:700">${allRows.length+1}</td>
+          <td style="white-space:nowrap;font-weight:600">${esc(dateStr)}</td>
+          <td><span style="background:${rackBg[r.rackId]||'#f3f4f6'};color:${rackColor[r.rackId]||'#374151'};padding:1pt 6pt;border-radius:3pt;font-size:7pt;font-weight:800;-webkit-print-color-adjust:exact;print-color-adjust:exact">${esc(r.rackId)}</span></td>
+          <td>${esc(r.cleaningTime)}</td>
+          <td>${esc(r.method)}</td>
+          <td style="text-align:center"><span style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:1pt 5pt;border-radius:3pt;font-size:6.5pt;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact">${r.cleaningDone!==false?'\u2713 YES':'\u2717 NO'}</span></td>
+          <td>${esc(r.checkedBy)}</td>
+          <td style="color:#6b7280;font-size:7.5pt">${esc(r.remarks)}</td>
+        </tr>`);
+      });
+    });
+
+    const [sy,sm,sd] = dates[0].split('-');
+    const [ey,em,ed] = dates[dates.length-1].split('-');
+    const rangeStr = `${sd}/${sm}/${sy} – ${ed}/${em}/${ey}`;
+    const totalRecs = allRows.length;
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Rack Cleaning Record — 365 Spicery</title>
+<style>
+  @page{size:A4 landscape;margin:8mm}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{font-family:Arial,sans-serif;font-size:8pt;color:#000;background:#fff}
+  table{width:100%;border-collapse:collapse;margin-top:5pt}
+  thead{display:table-header-group}
+  tr{page-break-inside:avoid}
+  th{background:#1a1a1a;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-size:7pt;padding:4pt 4pt;border:0.75pt solid #000;text-align:left}
+  td{font-size:7.5pt;padding:2.5pt 4pt;border:0.5pt solid #ccc;vertical-align:middle}
+</style></head><body>
+<div style="border:2pt solid #000;padding:5pt 10pt;margin-bottom:5pt">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start">
+    <div>
+      <h1 style="font-size:12pt;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rack Cleaning Record — 365 Spicery</h1>
+      <p style="font-size:7pt;color:#444;margin-top:2pt">FSSAI Compliance Log • Daily Rack Sanitation</p>
+    </div>
+    <div style="text-align:right;font-size:7.5pt;color:#444;line-height:1.6">
+      <div><b>Date Range:</b> ${rangeStr}</div>
+      <div><b>Total Records:</b> ${totalRecs}</div>
+    </div>
+  </div>
+</div>
+<table>
+  <thead><tr>
+    <th style="width:4%;text-align:center">SR.</th><th style="width:9%">DATE</th>
+    <th style="width:8%">RACK</th>
+    <th style="width:7%;text-align:center">TIME</th><th style="width:15%">METHOD</th>
+    <th style="width:8%;text-align:center">DONE</th><th style="width:14%">CHECKED BY</th>
+    <th>REMARKS</th>
+  </tr></thead>
+  <tbody>${allRows.join('')}</tbody>
+</table>
+<script>window.onload=function(){window.print();setTimeout(function(){window.close();},900);};<\/script>
+</body></html>`;
+
+    const pw = window.open('','_blank','width=1200,height=850');
+    if (pw) { pw.document.write(html); pw.document.close(); }
+    else alert('Allow popups to use Print.');
+    return;
+  }
+
+  // ── SINGLE DAY MODE: one page per day (original behaviour) ──
   const pagesHtml = dates.map((ds, pi) => {
     const recs = allRecords.filter(r => r.date === ds)
                            .sort((a,b) => (a.cleaningTime||'').localeCompare(b.cleaningTime||''));
@@ -482,7 +555,7 @@ function printRackRecords(dates) {
   </div>
   <div style="display:flex;gap:8pt;margin-top:5pt">
     <span style="border:1pt solid #555;padding:1pt 7pt;font-size:7pt;border-radius:3pt">📋 Records: <b>${recs.length}</b></span>
-    <span style="border:1pt solid #555;padding:1pt 7pt;font-size:7pt;border-radius:3pt">🧹 Racks Cleaned: <b>${[...new Set(recs.map(r=>r.rackId))].join(', ')||'\u2014'}</b></span>
+    <span style="border:1pt solid #555;padding:1pt 7pt;font-size:7pt;border-radius:3pt">🧹 Racks Cleaned: <b>${[...new Set(recs.map(r=>r.rackId))].join(', ')||'—'}</b></span>
   </div>
 </div>
 <table>
@@ -509,8 +582,7 @@ function printRackRecords(dates) {
   tr{page-break-inside:avoid}
   th{background:#1a1a1a;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-size:7pt;padding:5pt 4pt;border:0.75pt solid #000;text-align:left}
   td{font-size:8pt;padding:3pt 4pt;border:0.5pt solid #ccc;vertical-align:middle}
-</style></head>
-<body>${pagesHtml}
+</style></head><body>${pagesHtml}
 <script>window.onload=function(){window.print();setTimeout(function(){window.close();},900);};<\/script>
 </body></html>`;
 
