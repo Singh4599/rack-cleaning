@@ -1,5 +1,5 @@
 import { saveRecord, updateRecord, deleteRecord, batchSaveRecords, subscribeRecords } from './firebase-config.js';
-import { generateDayEntries, generateDateRange, todayStr, STAFF } from './auto-generate.js';
+import { generateDayEntries, generateDateRange, todayStr, STAFF, UNITS } from './auto-generate.js';
 
 // ── STATE ──────────────────────────────────────────────────────────────────────
 let allRecords  = [];
@@ -83,13 +83,16 @@ let _todayConfirmed = false;
 function checkAndGenerateToday() {
   if (_todayConfirmed) return;
   const today = todayStr();
-  const hasEntries = allRecords.some(r => r.date === today);
-  if (hasEntries) {
-    _todayConfirmed = true;
-  } else {
-    _todayConfirmed = true;
-    const entries = generateDayEntries(today);
-    batchSaveRecords(entries).catch(err => {
+  // Sunday → skip
+  if (new Date(today + 'T00:00:00').getDay() === 0) { _todayConfirmed = true; return; }
+  const hasUnit11 = allRecords.some(r => r.date === today && (r.unit || 'Unit 11') === 'Unit 11');
+  const hasUnit12 = allRecords.some(r => r.date === today && r.unit === 'Unit 12');
+  _todayConfirmed = true;
+  const toGenerate = [];
+  if (!hasUnit11) toGenerate.push(...generateDayEntries(today, 'Unit 11'));
+  if (!hasUnit12) toGenerate.push(...generateDayEntries(today, 'Unit 12'));
+  if (toGenerate.length) {
+    batchSaveRecords(toGenerate).catch(err => {
       _todayConfirmed = false;
       console.error(err);
     });
@@ -106,7 +109,7 @@ async function deduplicateDate(dateStr) {
     .sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0))
     .forEach(r => {
       // Key: rack + time (unique per cleaning event)
-      const key = `${r.rackId}|${r.cleaningTime}`;
+      const key = `${r.unit || 'Unit 11'}|${r.rackId}|${r.cleaningTime}`;
       if (seen.has(key)) {
         toDelete.push(r.id);
       } else {
