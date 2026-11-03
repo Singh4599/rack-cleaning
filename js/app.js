@@ -528,7 +528,6 @@ function printRackRecords(dates) {
     const dateStr = `${d}/${m}/${y}`;
     const dayName = new Date(ds+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long'});
     const rowH = recs.length ? Math.max(12, Math.floor(155/Math.max(recs.length,3))) : 22;
-
     const rowsHtml = recs.length
       ? recs.map((r,i) => `<tr style="height:${rowH}mm;${i%2===1?'background:#f9fafb':''}">
           <td style="text-align:center;color:#6b7280;font-weight:700">${i+1}</td>
@@ -541,7 +540,6 @@ function printRackRecords(dates) {
           <td style="color:#6b7280;font-size:7.5pt">${esc(r.remarks)}</td>
         </tr>`).join('')
       : `<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:20pt;font-style:italic">No records for this date</td></tr>`;
-
     return `<div style="page-break-after:${pi<dates.length-1?'always':'avoid'}">
 <div style="border:2pt solid #000;padding:6pt 10pt;margin-bottom:6pt">
   <div style="display:flex;justify-content:space-between;align-items:flex-start">
@@ -590,77 +588,6 @@ function printRackRecords(dates) {
   if (pw) { pw.document.write(html); pw.document.close(); }
   else alert('Allow popups to use Print.');
 }
-
-  const pagesHtml = dates.map((ds, pi) => {
-    const recs = allRecords.filter(r => r.date === ds)
-                           .sort((a,b) => (a.cleaningTime||'').localeCompare(b.cleaningTime||''));
-    const [y,m,d] = ds.split('-');
-    const dateStr = `${d}/${m}/${y}`;
-    const dayName = new Date(ds+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long'});
-    const rowH = recs.length ? Math.max(12, Math.floor(155/Math.max(recs.length,3))) : 22;
-
-    const rowsHtml = recs.length
-      ? recs.map((r,i) => `<tr style="height:${rowH}mm;${i%2===1?'background:#f9fafb':''}">
-          <td style="text-align:center;color:#6b7280;font-weight:700">${i+1}</td>
-          <td style="white-space:nowrap;font-weight:600">${esc(dateStr)}</td>
-          <td><span style="background:${rackBg[r.rackId]||'#f3f4f6'};color:${rackColor[r.rackId]||'#374151'};padding:2pt 7pt;border-radius:4pt;font-size:7pt;font-weight:800;-webkit-print-color-adjust:exact;print-color-adjust:exact">${esc(r.rackId)}</span></td>
-          <td>${esc(r.cleaningTime)}</td>
-          <td>${esc(r.method)}</td>
-          <td style="text-align:center"><span style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:1.5pt 5pt;border-radius:3pt;font-size:6.5pt;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact">${r.cleaningDone!==false?'\u2713 YES':'\u2717 NO'}</span></td>
-          <td>${esc(r.checkedBy)}</td>
-          <td style="color:#6b7280;font-size:7.5pt">${esc(r.remarks)}</td>
-        </tr>`).join('')
-      : `<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:20pt;font-style:italic">No records for this date</td></tr>`;
-
-    return `<div style="page-break-after:${pi<dates.length-1?'always':'avoid'}">
-<div style="border:2pt solid #000;padding:6pt 10pt;margin-bottom:6pt">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start">
-    <div>
-      <h1 style="font-size:13pt;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rack Cleaning Record — 365 Spicery</h1>
-      <p style="font-size:7.5pt;color:#444;margin-top:2pt">FSSAI Compliance Log • Daily Rack Sanitation</p>
-    </div>
-    <div style="text-align:right;font-size:7.5pt;color:#444;line-height:1.6">
-      <div><b>Date:</b> ${dateStr} &nbsp; <b>Day:</b> ${dayName}</div>
-    </div>
-  </div>
-  <div style="display:flex;gap:8pt;margin-top:5pt">
-    <span style="border:1pt solid #555;padding:1pt 7pt;font-size:7pt;border-radius:3pt">📋 Records: <b>${recs.length}</b></span>
-    <span style="border:1pt solid #555;padding:1pt 7pt;font-size:7pt;border-radius:3pt">🧹 Racks Cleaned: <b>${[...new Set(recs.map(r=>r.rackId))].join(', ')||'—'}</b></span>
-  </div>
-</div>
-<table>
-  <thead><tr>
-    <th style="width:4%;text-align:center">SR.</th><th style="width:9%">DATE</th>
-    <th style="width:8%">RACK</th>
-    <th style="width:7%;text-align:center">TIME</th><th style="width:15%">METHOD</th>
-    <th style="width:8%;text-align:center">DONE</th><th style="width:14%">CHECKED BY</th>
-    <th>REMARKS</th>
-  </tr></thead>
-  <tbody>${rowsHtml}</tbody>
-</table>
-</div>`;
-  }).join('');
-
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
-<title>Rack Cleaning Record — 365 Spicery</title>
-<style>
-  @page{size:A4 landscape;margin:8mm}
-  *{margin:0;padding:0;box-sizing:border-box}
-  html,body{font-family:Arial,sans-serif;font-size:8.5pt;color:#000;background:#fff}
-  table{width:100%;border-collapse:collapse;margin-top:5pt}
-  thead{display:table-header-group}
-  tr{page-break-inside:avoid}
-  th{background:#1a1a1a;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-size:7pt;padding:5pt 4pt;border:0.75pt solid #000;text-align:left}
-  td{font-size:8pt;padding:3pt 4pt;border:0.5pt solid #ccc;vertical-align:middle}
-</style></head><body>${pagesHtml}
-<script>window.onload=function(){window.print();setTimeout(function(){window.close();},900);};<\/script>
-</body></html>`;
-
-  const pw = window.open('','_blank','width=1200,height=850');
-  if (pw) { pw.document.write(html); pw.document.close(); }
-  else alert('Allow popups to use Print.');
-
-// ── SETTINGS ──────────────────────────────────────────────────────────────────
 window.toggleSettings = function() {
   const p = document.getElementById('settings-panel');
   p.style.display = p.style.display === 'none' ? 'block' : 'none';
