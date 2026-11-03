@@ -659,7 +659,6 @@ function printRackRecords(dates) {
   const pw = window.open('','_blank','width=1200,height=850');
   if (pw) { pw.document.write(html); pw.document.close(); }
   else alert('Allow popups to use Print.');
-}
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
 window.toggleSettings = function() {
