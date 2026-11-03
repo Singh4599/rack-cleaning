@@ -4,6 +4,7 @@ import { generateDayEntries, generateDateRange, todayStr, STAFF } from './auto-g
 // ── STATE ──────────────────────────────────────────────────────────────────────
 let allRecords  = [];
 let activeDate  = todayStr();   // single-day filter (default = today)
+let activeUnit  = localStorage.getItem('rc_active_unit') || 'Unit 11';
 let searchQuery = '';
 let editingId   = null;
 let isOnline    = navigator.onLine;
@@ -176,14 +177,30 @@ function renderNavBadge() {
   if (el) el.textContent = allRecords.length;
 }
 
+// ── UNIT TOGGLE ───────────────────────────────────────────────────────────────
+window.setActiveUnit = function(unit) {
+  activeUnit = unit;
+  localStorage.setItem('rc_active_unit', unit);
+  ['Unit 11', 'Unit 12'].forEach(u => {
+    const btn = document.getElementById(u === 'Unit 11' ? 'unit-btn-11' : 'unit-btn-12');
+    if (!btn) return;
+    const isActive = u === unit;
+    btn.classList.toggle('active', isActive);
+    btn.style.background = isActive ? 'var(--brand)' : 'transparent';
+    btn.style.color = isActive ? '#fff' : 'var(--brand)';
+  });
+  renderAll();
+};
+
 // ── STAT CARDS ────────────────────────────────────────────────────────────────
 function renderStatCards() {
-  const todayRecs = allRecords.filter(r => r.date === todayStr());
+  const unitRecs  = allRecords.filter(r => (r.unit || 'Unit 11') === activeUnit);
+  const todayRecs = unitRecs.filter(r => r.date === todayStr());
   const racks = new Set(todayRecs.map(r => r.rackId)).size;
 
-  document.getElementById('stat-total').textContent   = allRecords.length;
+  document.getElementById('stat-total').textContent   = unitRecs.length;
   document.getElementById('stat-racks').textContent   = racks;
-  document.getElementById('stat-pending').textContent = 0; // all auto-generated = done
+  document.getElementById('stat-pending').textContent = 0;
 
   // Period card
   const isToday = activeDate === todayStr();
@@ -216,7 +233,7 @@ function renderDateHeading() {
 
 // ── TABLE ─────────────────────────────────────────────────────────────────────
 function renderTable() {
-  let recs = allRecords.filter(r => r.date === activeDate);
+  let recs = allRecords.filter(r => r.date === activeDate && (r.unit || 'Unit 11') === activeUnit);
 
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
@@ -454,7 +471,7 @@ function printRackRecords(dates) {
     // ── RANGE MODE: all records in ONE continuous table, compact rows ──
     const allRows = [];
     dates.forEach(ds => {
-      const recs = allRecords.filter(r => r.date === ds)
+      const recs = allRecords.filter(r => r.date === ds && (r.unit || 'Unit 11') === activeUnit)
                              .sort((a,b) => (a.cleaningTime||'').localeCompare(b.cleaningTime||''));
       const [y,m,d] = ds.split('-');
       const dateStr = `${d}/${m}/${y}`;
@@ -493,11 +510,11 @@ function printRackRecords(dates) {
   <div style="display:flex;justify-content:space-between;align-items:flex-start">
     <div>
       <h1 style="font-size:12pt;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rack Cleaning Record — LV Spices</h1>
-      <p style="font-size:7pt;color:#444;margin-top:2pt">FSSAI Compliance Log • Daily Rack Sanitation</p>
+      <p style="font-size:7pt;color:#444;margin-top:2pt">FSSAI Compliance Log • Daily Rack Sanitation • <b>${activeUnit}</b></p>
     </div>
     <div style="text-align:right;font-size:7.5pt;color:#444;line-height:1.6">
       <div><b>Date Range:</b> ${rangeStr}</div>
-      <div><b>Total Records:</b> ${totalRecs}</div>
+      <div><b>Total Records:</b> ${totalRecs} &nbsp; <b>Unit:</b> ${activeUnit}</div>
     </div>
   </div>
 </div>
@@ -522,7 +539,7 @@ function printRackRecords(dates) {
 
   // ── SINGLE DAY MODE: one page per day (original behaviour) ──
   const pagesHtml = dates.map((ds, pi) => {
-    const recs = allRecords.filter(r => r.date === ds)
+    const recs = allRecords.filter(r => r.date === ds && (r.unit || 'Unit 11') === activeUnit)
                            .sort((a,b) => (a.cleaningTime||'').localeCompare(b.cleaningTime||''));
     const [y,m,d] = ds.split('-');
     const dateStr = `${d}/${m}/${y}`;
@@ -545,7 +562,7 @@ function printRackRecords(dates) {
   <div style="display:flex;justify-content:space-between;align-items:flex-start">
     <div>
       <h1 style="font-size:13pt;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rack Cleaning Record — LV Spices</h1>
-      <p style="font-size:7.5pt;color:#444;margin-top:2pt">FSSAI Compliance Log • Daily Rack Sanitation</p>
+      <p style="font-size:7.5pt;color:#444;margin-top:2pt">FSSAI Compliance Log • Daily Rack Sanitation • <b>${activeUnit}</b></p>
     </div>
     <div style="text-align:right;font-size:7.5pt;color:#444;line-height:1.6">
       <div><b>Date:</b> ${dateStr} &nbsp; <b>Day:</b> ${dayName}</div>
@@ -606,6 +623,16 @@ function init() {
   // Default date = today
   activeDate = todayStr();
   syncDateUI();
+
+  // Init unit toggle state from localStorage
+  document.getElementById('unit-btn-11')?.classList.toggle('active', activeUnit === 'Unit 11');
+  document.getElementById('unit-btn-12')?.classList.toggle('active', activeUnit === 'Unit 12');
+  if (activeUnit === 'Unit 12') {
+    const b11 = document.getElementById('unit-btn-11');
+    const b12 = document.getElementById('unit-btn-12');
+    if (b11) { b11.style.background = 'transparent'; b11.style.color = 'var(--brand)'; }
+    if (b12) { b12.style.background = 'var(--brand)'; b12.style.color = '#fff'; }
+  }
 
   // Today button
   document.getElementById('btn-today')?.addEventListener('click', window.setToday);
